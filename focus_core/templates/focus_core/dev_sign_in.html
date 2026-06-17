@@ -1,0 +1,14 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Development Sign In{% endblock %}
+
+{% block content %}
+<div class="content-narrow">
+    <h1>Development sign in</h1>
+    <p>This local-only sign in creates a pseudonymous development session without storing an email or password.</p>
+    <form method="post" class="form-stack">
+        {% csrf_token %}
+        <button type="submit" class="button">Start development session</button>
+    </form>
+</div>
+{% endblock %}

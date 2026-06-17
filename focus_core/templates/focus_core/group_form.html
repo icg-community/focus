@@ -1,0 +1,23 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Create Group{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li>Create group</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <h1>Create production group</h1>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+        {% include "focus_core/includes/field.html" with field=form.name %}
+        <button type="submit" class="button">Create group</button>
+    </form>
+</div>
+{% endblock %}

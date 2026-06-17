@@ -64,3 +64,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+LOGIN_URL = "dev_sign_in"
+LOGIN_REDIRECT_URL = "dashboard"
+LOGOUT_REDIRECT_URL = "dev_sign_in"
+
+FOCUS_ENABLE_DEV_SIGN_IN = DEBUG

@@ -1,0 +1,26 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}{% if object %}Edit Project{% else %}Create Project{% endif %}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></li>
+        <li>{% if object %}Edit project{% else %}Create project{% endif %}</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <h1>{% if object %}Edit {{ object.title }}{% else %}Create project{% endif %}</h1>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+        {% for field in form %}
+            {% include "focus_core/includes/field.html" with field=field %}
+        {% endfor %}
+        <button type="submit" class="button">{% if object %}Save project{% else %}Create project{% endif %}</button>
+    </form>
+</div>
+{% endblock %}

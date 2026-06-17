@@ -1,0 +1,30 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Signed in as {{ request.user.public_name }}</p>
+        <h1>Production groups</h1>
+    </div>
+    <a class="button" href="{% url 'group_create' %}">Create group</a>
+</div>
+
+{% if groups %}
+    <ul class="item-list" aria-label="Your production groups">
+        {% for group in groups %}
+            <li class="item-card">
+                <h2><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></h2>
+                <p>{{ group.projects.count }} project{{ group.projects.count|pluralize }}</p>
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <div class="empty-state">
+        <h2>No production groups yet</h2>
+        <p>Create a group to start organizing projects, scripts, assets, and production status.</p>
+        <a class="button" href="{% url 'group_create' %}">Create your first group</a>
+    </div>
+{% endif %}
+{% endblock %}

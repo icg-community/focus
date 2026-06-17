@@ -1,5 +1,6 @@
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.urls import reverse
 
 from .models import AuthIdentity, FocusUser, Membership, ProductionGroup, RecoveryCode
 
@@ -91,3 +92,110 @@ class MembershipTests(TestCase):
         removable.delete()
 
         self.assertFalse(Membership.objects.filter(pk=removable.pk).exists())
+
+
+class ProductionFlowTests(TestCase):
+    def test_dashboard_requires_sign_in(self):
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dev_sign_in"), response["Location"])
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_sign_in_creates_pseudonymous_session(self):
+        response = self.client.post(reverse("dev_sign_in"), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Production groups")
+        self.assertTrue(AuthIdentity.objects.filter(provider="GITHUB", subject_id="focus-dev-user").exists())
+
+    def test_group_create_adds_current_user_as_owner(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("group_create"), {"name": "Studio Team"})
+
+        group = ProductionGroup.objects.get(slug="studio-team")
+        self.assertRedirects(response, reverse("group_detail", kwargs={"slug": "studio-team"}))
+        self.assertTrue(Membership.objects.filter(user=user, group=group, role=Membership.Role.OWNER).exists())
+
+    def test_dashboard_only_shows_user_groups(self):
+        user = FocusUser.objects.create(display_name="Member")
+        other_user = FocusUser.objects.create(display_name="Other")
+        visible_group = ProductionGroup.objects.create(name="Visible Studio", slug="visible-studio")
+        hidden_group = ProductionGroup.objects.create(name="Hidden Studio", slug="hidden-studio")
+        Membership.objects.create(user=user, group=visible_group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_user, group=hidden_group, role=Membership.Role.OWNER)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Visible Studio")
+        self.assertNotContains(response, "Hidden Studio")
+
+    def test_group_detail_rejects_non_member(self):
+        user = FocusUser.objects.create(display_name="Member")
+        group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_project_create_and_edit_within_member_group(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(user)
+
+        create_response = self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "Launch Video",
+                "description": "Opening episode",
+                "status": "SCRIPTING",
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        project = group.projects.get(title="Launch Video")
+        self.assertRedirects(create_response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertEqual(project.status, "SCRIPTING")
+
+        edit_response = self.client.post(
+            reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "title": "Launch Video",
+                "description": "Opening episode",
+                "status": "EDITING",
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        project.refresh_from_db()
+        self.assertRedirects(edit_response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertEqual(project.status, "EDITING")
+
+    def test_project_form_errors_are_exposed_to_assistive_technology(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "",
+                "description": "",
+                "status": "IDEA",
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="title-error"')

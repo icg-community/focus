@@ -1,0 +1,19 @@
+[project]
+name = "focus"
+version = "0.1.0"
+description = "Privacy-first production management hub for content creation teams."
+requires-python = ">=3.12"
+dependencies = [
+    "Django>=5.0,<6.0",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["focus_core", "focus_project"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "focus_project.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]

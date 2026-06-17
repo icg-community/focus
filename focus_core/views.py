@@ -1,15 +1,17 @@
 from django.conf import settings
 from django import forms
+from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.core.exceptions import PermissionDenied
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.text import slugify
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import ProductionGroupForm, VideoProjectForm
-from .models import AuthIdentity, Membership, ProductionGroup, VideoProject
+from .forms import GroupInvitationForm, ProductionGroupForm, VideoProjectForm
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, VideoProject
 
 
 def unique_group_slug(name):
@@ -20,6 +22,10 @@ def unique_group_slug(name):
         slug = f"{base_slug}-{suffix}"
         suffix += 1
     return slug
+
+
+def user_group_membership(user, group):
+    return Membership.objects.filter(user=user, group=group).first()
 
 
 class DevSignInView(FormView):
@@ -85,6 +91,78 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["projects"] = self.object.projects.order_by("-updated_at", "title")
+        context["membership"] = user_group_membership(self.request.user, self.object)
+        return context
+
+
+class GroupInvitationView(LoginRequiredMixin, FormView):
+    form_class = GroupInvitationForm
+    template_name = "focus_core/group_invitations.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        self.membership = user_group_membership(request.user, self.group)
+        if self.membership.role != Membership.Role.OWNER:
+            raise PermissionDenied("Only group owners can manage invite links.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        invitation = form.save(commit=False)
+        invitation.group = self.group
+        invitation.save()
+        messages.success(self.request, "Invite link created.")
+        return redirect("group_invitations", slug=self.group.slug)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        invitations = self.group.invitations.order_by("-created_at")
+        context["group"] = self.group
+        context["membership"] = self.membership
+        context["invite_rows"] = [
+            {
+                "invitation": invitation,
+                "accept_url": self.request.build_absolute_uri(
+                    reverse("invite_accept", kwargs={"token": invitation.token})
+                ),
+            }
+            for invitation in invitations
+        ]
+        return context
+
+
+class InvitationAcceptView(LoginRequiredMixin, TemplateView):
+    template_name = "focus_core/invite_accept.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.invitation = get_object_or_404(
+            GroupInvitation.objects.select_related("group"),
+            token=kwargs["token"],
+        )
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        existing_membership = user_group_membership(request.user, self.invitation.group)
+        if existing_membership:
+            messages.info(request, "You already belong to this production group.")
+            return redirect("group_detail", slug=self.invitation.group.slug)
+
+        if self.invitation.is_used:
+            return self.get(request, *args, **kwargs)
+
+        Membership.objects.create(
+            user=request.user,
+            group=self.invitation.group,
+            role=self.invitation.role_to_assign,
+        )
+        self.invitation.is_used = True
+        self.invitation.save(update_fields=["is_used"])
+        messages.success(request, f"You joined {self.invitation.group.name}.")
+        return redirect("group_detail", slug=self.invitation.group.slug)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["invitation"] = self.invitation
+        context["already_member"] = user_group_membership(self.request.user, self.invitation.group) is not None
         return context
 
 

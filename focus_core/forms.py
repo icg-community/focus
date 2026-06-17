@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import ProductionGroup, VideoProject
+from .models import GroupInvitation, ProductionGroup, VideoProject
 
 
 class AccessibleModelForm(forms.ModelForm):
@@ -51,4 +51,16 @@ class VideoProjectForm(AccessibleModelForm):
         }
         widgets = {
             "description": forms.Textarea(attrs={"rows": 5}),
+        }
+
+
+class GroupInvitationForm(AccessibleModelForm):
+    class Meta:
+        model = GroupInvitation
+        fields = ["role_to_assign"]
+        labels = {
+            "role_to_assign": "Role for this invite",
+        }
+        help_texts = {
+            "role_to_assign": "Choose the role the next person receives when they accept this link.",
         }

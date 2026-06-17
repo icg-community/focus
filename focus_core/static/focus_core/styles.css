@@ -109,6 +109,16 @@ a:hover {
     margin-bottom: 2rem;
 }
 
+.action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.section-block {
+    margin-top: 2rem;
+}
+
 h1,
 h2,
 h3 {

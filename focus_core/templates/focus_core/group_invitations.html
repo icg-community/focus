@@ -1,0 +1,65 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Invitations for {{ group.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></li>
+        <li>Invitations</li>
+    </ol>
+</nav>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Production group</p>
+        <h1>Invitations for {{ group.name }}</h1>
+    </div>
+</div>
+
+<section class="content-narrow">
+    <h2>Create invite link</h2>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+        {% include "focus_core/includes/field.html" with field=form.role_to_assign %}
+        <button type="submit" class="button">Create invite</button>
+    </form>
+</section>
+
+<section class="section-block">
+    <h2>Invite links</h2>
+    {% if invite_rows %}
+        <div class="table-wrap">
+            <table>
+                <caption>Invite links for {{ group.name }}</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">Role</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Created</th>
+                        <th scope="col">Link</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in invite_rows %}
+                        <tr>
+                            <th scope="row">{{ row.invitation.get_role_to_assign_display }}</th>
+                            <td>{% if row.invitation.is_used %}Used{% else %}Available{% endif %}</td>
+                            <td>{{ row.invitation.created_at|date:"M j, Y" }}</td>
+                            <td><a href="{{ row.accept_url }}">Open invite for {{ row.invitation.get_role_to_assign_display }}</a></td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h3>No invite links yet</h3>
+            <p>Create an invite link when you are ready to bring someone into this production group.</p>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import AuthIdentity, FocusUser, Membership, ProductionGroup, RecoveryCode
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode
 
 
 class FocusUserTests(TestCase):
@@ -199,3 +199,125 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-invalid="true"')
         self.assertContains(response, 'id="title-error"')
+
+
+class InvitationFlowTests(TestCase):
+    def test_owner_can_create_invite_link(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("group_invitations", kwargs={"slug": group.slug}),
+            {"role_to_assign": Membership.Role.EDITOR},
+        )
+
+        invitation = GroupInvitation.objects.get(group=group)
+        self.assertRedirects(response, reverse("group_invitations", kwargs={"slug": group.slug}))
+        self.assertEqual(invitation.role_to_assign, Membership.Role.EDITOR)
+
+    def test_non_owner_cannot_create_invite_link(self):
+        member = FocusUser.objects.create(display_name="Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(member)
+
+        response = self.client.post(
+            reverse("group_invitations", kwargs={"slug": group.slug}),
+            {"role_to_assign": Membership.Role.WRITER},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(GroupInvitation.objects.filter(group=group).exists())
+
+    def test_non_owner_cannot_view_existing_invite_links(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(member)
+
+        response = self.client.get(reverse("group_invitations", kwargs={"slug": group.slug}))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_owner_can_view_existing_invite_links(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("group_invitations", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Invite links for Studio")
+        self.assertContains(response, str(invitation.token))
+        self.assertContains(response, "Create invite link")
+
+    def test_signed_in_user_can_accept_unused_invite(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        new_member = FocusUser.objects.create(display_name="New Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(new_member)
+
+        response = self.client.post(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        invitation.refresh_from_db()
+        self.assertRedirects(response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertTrue(invitation.is_used)
+        self.assertTrue(
+            Membership.objects.filter(user=new_member, group=group, role=Membership.Role.WRITER).exists()
+        )
+
+    def test_used_invite_cannot_be_reused(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        new_member = FocusUser.objects.create(display_name="New Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(
+            group=group,
+            role_to_assign=Membership.Role.WRITER,
+            is_used=True,
+        )
+        self.client.force_login(new_member)
+
+        response = self.client.post(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This invite has already been used")
+        self.assertFalse(Membership.objects.filter(user=new_member, group=group).exists())
+
+    def test_existing_member_does_not_consume_invite(self):
+        member = FocusUser.objects.create(display_name="Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(member)
+
+        response = self.client.post(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        invitation.refresh_from_db()
+        self.assertRedirects(response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertFalse(invitation.is_used)
+        self.assertEqual(Membership.objects.get(user=member, group=group).role, Membership.Role.EDITOR)
+
+    def test_invitation_form_errors_are_exposed_to_assistive_technology(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("group_invitations", kwargs={"slug": group.slug}),
+            {"role_to_assign": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="role_to_assign-error"')

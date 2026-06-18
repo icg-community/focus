@@ -28,6 +28,7 @@
             <tr>
                 <th scope="col">Member</th>
                 <th scope="col">Current role</th>
+                <th scope="col">Availability</th>
                 <th scope="col">Joined</th>
                 {% if can_manage_members %}
                     <th scope="col">Actions</th>
@@ -41,6 +42,7 @@
                         <a href="{% url 'member_profile' group.slug row.membership.pk %}">{{ row.membership.user.public_name }}</a>
                     </th>
                     <td>{{ row.membership.get_role_display }}</td>
+                    <td>{{ row.membership.user.get_availability_display }}</td>
                     <td>{{ row.membership.joined_at|date:"M j, Y" }}</td>
                     {% if can_manage_members %}
                         <td>

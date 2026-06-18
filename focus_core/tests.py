@@ -689,7 +689,10 @@ class InvitationFlowTests(TestCase):
 class MemberManagementFlowTests(TestCase):
     def test_group_member_can_view_roster(self):
         owner = FocusUser.objects.create(display_name="Owner")
-        member = FocusUser.objects.create(display_name="Editor")
+        member = FocusUser.objects.create(
+            display_name="Editor",
+            availability=FocusUser.Availability.BUSY,
+        )
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
         Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
         member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
@@ -700,6 +703,8 @@ class MemberManagementFlowTests(TestCase):
         self.assertContains(response, "Members of Studio")
         self.assertContains(response, "Owner")
         self.assertContains(response, "Editor")
+        self.assertContains(response, "Availability")
+        self.assertContains(response, "Busy")
         self.assertContains(response, reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
         self.assertNotContains(response, "Save role for Owner")
 

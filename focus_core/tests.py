@@ -33,6 +33,13 @@ class FocusUserTests(TestCase):
 
         self.assertFalse(user.has_usable_password())
 
+    def test_new_users_start_with_private_profile_defaults(self):
+        user = FocusUser.objects.create()
+
+        self.assertEqual(user.bio, "")
+        self.assertEqual(user.availability, FocusUser.Availability.AVAILABLE)
+        self.assertFalse(user.show_assigned_projects)
+
 
 class RecoveryCodeTests(TestCase):
     def test_recovery_code_is_hashed_and_single_use(self):
@@ -174,24 +181,44 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("dev_sign_in"), response["Location"])
 
-    def test_profile_updates_display_name_without_pii_fields(self):
+    def test_profile_updates_public_profile_without_pii_fields(self):
         user = FocusUser.objects.create(display_name="Creator")
         self.client.force_login(user)
 
-        response = self.client.post(reverse("profile"), {"display_name": "Stage Name"})
+        response = self.client.post(
+            reverse("profile"),
+            {
+                "display_name": "Stage Name",
+                "bio": "I edit short documentaries and audio-led interviews.",
+                "availability": FocusUser.Availability.LIMITED,
+                "show_assigned_projects": "on",
+            },
+        )
 
         user.refresh_from_db()
         self.assertRedirects(response, reverse("profile"))
         self.assertEqual(user.display_name, "Stage Name")
+        self.assertEqual(user.bio, "I edit short documentaries and audio-led interviews.")
+        self.assertEqual(user.availability, FocusUser.Availability.LIMITED)
+        self.assertTrue(user.show_assigned_projects)
 
         profile_response = self.client.get(reverse("profile"))
         self.assertContains(profile_response, "Your current public name is Stage Name.")
         self.assertContains(profile_response, "Display name")
+        self.assertContains(profile_response, "Bio")
+        self.assertContains(profile_response, "Availability")
+        self.assertContains(profile_response, "Show projects I am working on")
+        self.assertContains(profile_response, "Avoid email addresses, legal names, phone numbers, or private schedule details.")
         self.assertNotContains(profile_response, 'name="email"')
         self.assertNotContains(profile_response, 'name="password"')
 
-    def test_profile_can_clear_display_name_to_use_provider_handle(self):
-        user = FocusUser.objects.create(display_name="Creator")
+    def test_profile_can_clear_optional_profile_fields(self):
+        user = FocusUser.objects.create(
+            display_name="Creator",
+            bio="Existing intro",
+            availability=FocusUser.Availability.BUSY,
+            show_assigned_projects=True,
+        )
         AuthIdentity.objects.create(
             user=user,
             provider="DISCORD",
@@ -200,25 +227,44 @@ class ProductionFlowTests(TestCase):
         )
         self.client.force_login(user)
 
-        response = self.client.post(reverse("profile"), {"display_name": ""}, follow=True)
+        response = self.client.post(
+            reverse("profile"),
+            {
+                "display_name": "",
+                "bio": "",
+                "availability": FocusUser.Availability.UNAVAILABLE,
+            },
+            follow=True,
+        )
 
         user.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(user.display_name, "")
+        self.assertEqual(user.bio, "")
+        self.assertEqual(user.availability, FocusUser.Availability.UNAVAILABLE)
+        self.assertFalse(user.show_assigned_projects)
         self.assertContains(response, "Your current public name is creator_handle.")
 
     def test_profile_form_errors_are_exposed_to_assistive_technology(self):
         user = FocusUser.objects.create(display_name="Creator")
         self.client.force_login(user)
 
-        response = self.client.post(reverse("profile"), {"display_name": "A" * 151})
+        response = self.client.post(
+            reverse("profile"),
+            {
+                "display_name": "Creator",
+                "bio": "A" * 501,
+                "availability": FocusUser.Availability.AVAILABLE,
+            },
+        )
 
         user.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(user.display_name, "Creator")
+        self.assertEqual(user.bio, "")
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-invalid="true"')
-        self.assertContains(response, 'id="display_name-error"')
+        self.assertContains(response, 'id="bio-error"')
 
     def test_group_detail_rejects_non_member(self):
         user = FocusUser.objects.create(display_name="Member")

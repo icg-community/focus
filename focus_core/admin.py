@@ -17,15 +17,15 @@ from .models import (
 class FocusUserAdmin(UserAdmin):
     fieldsets = (
         (None, {"fields": ("username", "password")}),
-        ("Public profile", {"fields": ("display_name",)}),
+        ("Public profile", {"fields": ("display_name", "bio", "availability", "show_assigned_projects")}),
         ("Permissions", {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
         ("Important dates", {"fields": ("last_login", "date_joined")}),
     )
     add_fieldsets = (
-        (None, {"fields": ("username", "display_name")}),
+        (None, {"fields": ("username", "display_name", "bio", "availability", "show_assigned_projects")}),
     )
     list_display = ("public_name", "username", "is_staff")
-    search_fields = ("username", "display_name", "identities__handle")
+    search_fields = ("username", "display_name", "bio", "identities__handle")
 
 
 admin.site.register(AuthIdentity)

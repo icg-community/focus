@@ -14,10 +14,14 @@
     <p class="eyebrow">Account</p>
     <h1>Profile</h1>
     <p>Your current public name is {{ request.user.public_name }}.</p>
+    <p>Only share details you want production group members to see. Avoid email addresses, legal names, phone numbers, or private schedule details.</p>
     {% include "focus_core/includes/form_errors.html" %}
     <form method="post" class="form-stack" novalidate>
         {% csrf_token %}
         {% include "focus_core/includes/field.html" with field=form.display_name %}
+        {% include "focus_core/includes/field.html" with field=form.bio %}
+        {% include "focus_core/includes/field.html" with field=form.availability %}
+        {% include "focus_core/includes/field.html" with field=form.show_assigned_projects %}
         <button type="submit" class="button">Save profile</button>
     </form>
 </div>

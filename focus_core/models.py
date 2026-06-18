@@ -19,7 +19,20 @@ class FocusUser(AbstractUser):
     last_name = None
     email = None
 
+    class Availability(models.TextChoices):
+        AVAILABLE = "AVAILABLE", "Available for new work"
+        LIMITED = "LIMITED", "Limited availability"
+        BUSY = "BUSY", "Busy"
+        UNAVAILABLE = "UNAVAILABLE", "Not available"
+
     display_name = models.CharField(max_length=150, blank=True)
+    bio = models.TextField(blank=True, max_length=500)
+    availability = models.CharField(
+        max_length=12,
+        choices=Availability.choices,
+        default=Availability.AVAILABLE,
+    )
+    show_assigned_projects = models.BooleanField(default=False)
 
     def save(self, *args, **kwargs):
         if not self.username:

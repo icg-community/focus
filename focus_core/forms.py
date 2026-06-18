@@ -11,6 +11,8 @@ class AccessibleModelForm(forms.ModelForm):
         for name, field in self.fields.items():
             if isinstance(field.widget, forms.CheckboxSelectMultiple):
                 field.widget.attrs.setdefault("class", "checkbox-input")
+            elif isinstance(field.widget, forms.CheckboxInput):
+                field.widget.attrs.setdefault("class", "checkbox-input")
             else:
                 field.widget.attrs.setdefault("class", "field-control")
             prefixed_name = self.add_prefix(name)
@@ -39,12 +41,21 @@ class ProductionGroupForm(AccessibleModelForm):
 class DisplayNameForm(AccessibleModelForm):
     class Meta:
         model = FocusUser
-        fields = ["display_name"]
+        fields = ["display_name", "bio", "availability", "show_assigned_projects"]
         labels = {
             "display_name": "Display name",
+            "bio": "Bio",
+            "availability": "Availability",
+            "show_assigned_projects": "Show projects I am working on",
         }
         help_texts = {
             "display_name": "Optional public alias shown to your production groups. Leave blank to use your connected account handle.",
+            "bio": "Optional short intro for people in your production groups. Avoid email addresses, legal names, phone numbers, or private schedule details.",
+            "availability": "Choose the simple status you want group members to see.",
+            "show_assigned_projects": "When profile sharing is added, only people who already share access to a group with you will be able to see your assigned projects.",
+        }
+        widgets = {
+            "bio": forms.Textarea(attrs={"rows": 4}),
         }
 
 

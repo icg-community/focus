@@ -36,6 +36,18 @@ class ProductionGroupForm(AccessibleModelForm):
         }
 
 
+class DisplayNameForm(AccessibleModelForm):
+    class Meta:
+        model = FocusUser
+        fields = ["display_name"]
+        labels = {
+            "display_name": "Display name",
+        }
+        help_texts = {
+            "display_name": "Optional public alias shown to your production groups. Leave blank to use your connected account handle.",
+        }
+
+
 class VideoProjectForm(AccessibleModelForm):
     def __init__(self, *args, group=None, **kwargs):
         super().__init__(*args, **kwargs)

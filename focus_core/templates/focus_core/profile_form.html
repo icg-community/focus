@@ -1,0 +1,24 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li>Profile</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Account</p>
+    <h1>Profile</h1>
+    <p>Your current public name is {{ request.user.public_name }}.</p>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.display_name %}
+        <button type="submit" class="button">Save profile</button>
+    </form>
+</div>
+{% endblock %}

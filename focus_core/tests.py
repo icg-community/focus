@@ -168,6 +168,58 @@ class ProductionFlowTests(TestCase):
         self.assertNotContains(response, "Hidden Assignment")
         self.assertNotContains(response, "Hidden Studio")
 
+    def test_profile_requires_sign_in(self):
+        response = self.client.get(reverse("profile"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dev_sign_in"), response["Location"])
+
+    def test_profile_updates_display_name_without_pii_fields(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("profile"), {"display_name": "Stage Name"})
+
+        user.refresh_from_db()
+        self.assertRedirects(response, reverse("profile"))
+        self.assertEqual(user.display_name, "Stage Name")
+
+        profile_response = self.client.get(reverse("profile"))
+        self.assertContains(profile_response, "Your current public name is Stage Name.")
+        self.assertContains(profile_response, "Display name")
+        self.assertNotContains(profile_response, 'name="email"')
+        self.assertNotContains(profile_response, 'name="password"')
+
+    def test_profile_can_clear_display_name_to_use_provider_handle(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("profile"), {"display_name": ""}, follow=True)
+
+        user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(user.display_name, "")
+        self.assertContains(response, "Your current public name is creator_handle.")
+
+    def test_profile_form_errors_are_exposed_to_assistive_technology(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("profile"), {"display_name": "A" * 151})
+
+        user.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(user.display_name, "Creator")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="display_name-error"')
+
     def test_group_detail_rejects_non_member(self):
         user = FocusUser.objects.create(display_name="Member")
         group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")

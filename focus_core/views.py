@@ -12,7 +12,7 @@ from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .forms import DisplayNameForm, GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, VideoProject
 
 
@@ -85,6 +85,22 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             for project in assigned_projects
         ]
         return context
+
+
+class ProfileView(LoginRequiredMixin, UpdateView):
+    form_class = DisplayNameForm
+    template_name = "focus_core/profile_form.html"
+
+    def get_object(self, queryset=None):
+        return self.request.user
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, "Profile updated.")
+        return response
+
+    def get_success_url(self):
+        return reverse("profile")
 
 
 class GroupCreateView(LoginRequiredMixin, CreateView):

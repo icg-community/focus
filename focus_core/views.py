@@ -229,6 +229,48 @@ class GroupMembersView(LoginRequiredMixin, TemplateView):
         return context
 
 
+class MemberProfileView(LoginRequiredMixin, DetailView):
+    model = Membership
+    template_name = "focus_core/member_profile.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_queryset(self):
+        return Membership.objects.filter(group=self.group).select_related("group", "user")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        profile_user = self.object.user
+        assigned_projects = VideoProject.objects.none()
+        if profile_user.show_assigned_projects:
+            assigned_projects = (
+                VideoProject.objects.filter(group=self.group)
+                .filter(Q(assigned_editors=profile_user) | Q(assigned_writers=profile_user))
+                .distinct()
+                .order_by("-updated_at", "title")
+            )
+
+        context["group"] = self.group
+        context["profile_user"] = profile_user
+        context["assignment_rows"] = [
+            {
+                "project": project,
+                "roles": [
+                    role
+                    for role, assignees in (
+                        ("Editor", project.assigned_editors.all()),
+                        ("Writer", project.assigned_writers.all()),
+                    )
+                    if profile_user in assignees
+                ],
+            }
+            for project in assigned_projects.prefetch_related("assigned_editors", "assigned_writers")
+        ]
+        return context
+
+
 class MembershipRoleUpdateView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)

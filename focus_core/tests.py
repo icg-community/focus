@@ -692,7 +692,7 @@ class MemberManagementFlowTests(TestCase):
         member = FocusUser.objects.create(display_name="Editor")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
         Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
-        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
         self.client.force_login(member)
 
         response = self.client.get(reverse("group_members", kwargs={"slug": group.slug}))
@@ -700,7 +700,77 @@ class MemberManagementFlowTests(TestCase):
         self.assertContains(response, "Members of Studio")
         self.assertContains(response, "Owner")
         self.assertContains(response, "Editor")
+        self.assertContains(response, reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
         self.assertNotContains(response, "Save role for Owner")
+
+    def test_group_member_can_view_member_profile(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(
+            display_name="Editor",
+            bio="Audio cleanup and captions.",
+            availability=FocusUser.Availability.LIMITED,
+        )
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=viewer, group=group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        private_project = VideoProject.objects.create(group=group, title="Private Assignment")
+        private_project.assigned_editors.add(member)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Editor")
+        self.assertContains(response, "Limited availability")
+        self.assertContains(response, "Audio cleanup and captions.")
+        self.assertContains(response, "Projects not shared")
+        self.assertNotContains(response, "Private Assignment")
+
+    def test_member_profile_rejects_non_member_viewer(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_member_profile_rejects_membership_from_another_group(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        other_group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")
+        Membership.objects.create(user=viewer, group=group, role=Membership.Role.OWNER)
+        other_membership = Membership.objects.create(user=member, group=other_group, role=Membership.Role.EDITOR)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": other_membership.pk}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_member_profile_shows_opted_in_assignments_only_for_current_group(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(display_name="Editor", show_assigned_projects=True)
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        other_group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")
+        Membership.objects.create(user=viewer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=viewer, group=other_group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=member, group=other_group, role=Membership.Role.EDITOR)
+        visible_project = VideoProject.objects.create(group=group, title="Visible Assignment")
+        hidden_project = VideoProject.objects.create(group=other_group, title="Other Group Assignment")
+        visible_project.assigned_editors.add(member)
+        hidden_project.assigned_editors.add(member)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertContains(response, "Projects assigned to Editor in Studio")
+        self.assertContains(response, "Visible Assignment")
+        self.assertContains(response, "Editor")
+        self.assertNotContains(response, "Other Group Assignment")
 
     def test_non_member_cannot_view_roster(self):
         user = FocusUser.objects.create(display_name="Outsider")

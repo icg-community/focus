@@ -1,0 +1,73 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}{{ profile_user.public_name }} in {{ group.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></li>
+        <li><a href="{% url 'group_members' group.slug %}">Members</a></li>
+        <li>{{ profile_user.public_name }}</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Member profile</p>
+    <h1>{{ profile_user.public_name }}</h1>
+
+    <dl class="detail-list">
+        <div>
+            <dt>Availability</dt>
+            <dd>{{ profile_user.get_availability_display }}</dd>
+        </div>
+        <div>
+            <dt>Bio</dt>
+            <dd>{{ profile_user.bio|default:"No bio added yet."|linebreaksbr }}</dd>
+        </div>
+    </dl>
+</div>
+
+<section class="section-block">
+    <h2>Assigned projects in {{ group.name }}</h2>
+    {% if profile_user.show_assigned_projects %}
+        {% if assignment_rows %}
+            <div class="table-wrap">
+                <table>
+                    <caption>Projects assigned to {{ profile_user.public_name }} in {{ group.name }}</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Project</th>
+                            <th scope="col">Role</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in assignment_rows %}
+                            <tr>
+                                <th scope="row">
+                                    <a href="{% url 'project_detail' group.slug row.project.pk %}">{{ row.project.title }}</a>
+                                </th>
+                                <td>{{ row.roles|join:", " }}</td>
+                                <td>{{ row.project.get_status_display }}</td>
+                                <td>{{ row.project.updated_at|date:"M j, Y" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <h3>No assigned projects in this group</h3>
+                <p>{{ profile_user.public_name }} has chosen to show assigned projects, but none are assigned here yet.</p>
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="empty-state">
+            <h3>Projects not shared</h3>
+            <p>{{ profile_user.public_name }} has not chosen to show assigned projects on their profile.</p>
+        </div>
+    {% endif %}
+</section>
+{% endblock %}

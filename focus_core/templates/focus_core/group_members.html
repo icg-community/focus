@@ -37,7 +37,9 @@
         <tbody>
             {% for row in member_rows %}
                 <tr>
-                    <th scope="row">{{ row.membership.user.public_name }}</th>
+                    <th scope="row">
+                        <a href="{% url 'member_profile' group.slug row.membership.pk %}">{{ row.membership.user.public_name }}</a>
+                    </th>
                     <td>{{ row.membership.get_role_display }}</td>
                     <td>{{ row.membership.joined_at|date:"M j, Y" }}</td>
                     {% if can_manage_members %}

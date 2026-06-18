@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject
+from .models import FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject, WebAuthnCredential
 
 
 class AccessibleForm(forms.Form):
@@ -89,6 +89,18 @@ class DisplayNameForm(AccessibleModelForm):
         }
         widgets = {
             "bio": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class PasskeyNameForm(AccessibleModelForm):
+    class Meta:
+        model = WebAuthnCredential
+        fields = ["name"]
+        labels = {
+            "name": "Passkey name",
+        }
+        help_texts = {
+            "name": "Use a name that helps you recognize this device, such as Laptop or Phone.",
         }
 
 

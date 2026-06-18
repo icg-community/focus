@@ -15,8 +15,8 @@ from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import BackupKeySignInForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject
+from .forms import BackupKeySignInForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -43,6 +43,22 @@ def generate_recovery_code():
         for _ in range(4)
     ]
     return "-".join(parts)
+
+
+def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
+    identities = user.identities.all()
+    if excluding_identity:
+        identities = identities.exclude(pk=excluding_identity.pk)
+
+    passkeys = user.webauthn_credentials.all()
+    if excluding_passkey:
+        passkeys = passkeys.exclude(pk=excluding_passkey.pk)
+
+    return (
+        identities.exists()
+        or passkeys.exists()
+        or user.recovery_codes.filter(used_at__isnull=True).exists()
+    )
 
 
 class DevSignInView(FormView):
@@ -147,7 +163,23 @@ class AccountSafetyView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["unused_recovery_code_count"] = self.request.user.recovery_codes.filter(used_at__isnull=True).count()
+        user = self.request.user
+        context["unused_recovery_code_count"] = user.recovery_codes.filter(used_at__isnull=True).count()
+        context["identity_rows"] = [
+            {
+                "identity": identity,
+                "can_remove": user_has_access_method(user, excluding_identity=identity),
+            }
+            for identity in user.identities.order_by("provider", "handle")
+        ]
+        context["passkey_rows"] = [
+            {
+                "passkey": passkey,
+                "display_name": passkey.name or "Unnamed passkey",
+                "can_remove": user_has_access_method(user, excluding_passkey=passkey),
+            }
+            for passkey in user.webauthn_credentials.order_by("created_at", "name")
+        ]
         return context
 
     def post(self, request, *args, **kwargs):
@@ -161,6 +193,49 @@ class AccountSafetyView(LoginRequiredMixin, TemplateView):
         context["unused_recovery_code_count"] = len(codes)
         messages.success(request, "New backup keys created. Save them now, because they will not be shown again.")
         return self.render_to_response(context)
+
+
+class LinkedAccountRemoveView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        identity = get_object_or_404(AuthIdentity, pk=kwargs["pk"], user=request.user)
+        if not user_has_access_method(request.user, excluding_identity=identity):
+            messages.error(request, "Create backup keys or add another sign-in method before removing this connected account.")
+            return redirect("account_safety")
+
+        account_name = str(identity)
+        identity.delete()
+        messages.success(request, f"Removed {account_name}.")
+        return redirect("account_safety")
+
+
+class PasskeyUpdateView(LoginRequiredMixin, UpdateView):
+    model = WebAuthnCredential
+    form_class = PasskeyNameForm
+    template_name = "focus_core/passkey_form.html"
+
+    def get_queryset(self):
+        return self.request.user.webauthn_credentials.all()
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, "Passkey name updated.")
+        return response
+
+    def get_success_url(self):
+        return reverse("account_safety")
+
+
+class PasskeyRemoveView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        passkey = get_object_or_404(WebAuthnCredential, pk=kwargs["pk"], user=request.user)
+        if not user_has_access_method(request.user, excluding_passkey=passkey):
+            messages.error(request, "Create backup keys or add another sign-in method before removing this passkey.")
+            return redirect("account_safety")
+
+        passkey_name = passkey.name or "Unnamed passkey"
+        passkey.delete()
+        messages.success(request, f"Removed {passkey_name}.")
+        return redirect("account_safety")
 
 
 class GroupCreateView(LoginRequiredMixin, CreateView):

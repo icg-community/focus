@@ -10,6 +10,13 @@ urlpatterns = [
     path("backup-key/sign-in/", views.BackupKeySignInView.as_view(), name="backup_key_sign_in"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("account/safety/", views.AccountSafetyView.as_view(), name="account_safety"),
+    path(
+        "account/linked-accounts/<int:pk>/remove/",
+        views.LinkedAccountRemoveView.as_view(),
+        name="linked_account_remove",
+    ),
+    path("account/passkeys/<int:pk>/edit/", views.PasskeyUpdateView.as_view(), name="passkey_update"),
+    path("account/passkeys/<int:pk>/remove/", views.PasskeyRemoveView.as_view(), name="passkey_remove"),
     path("sign-out/", LogoutView.as_view(), name="logout"),
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),
     path("groups/<slug:slug>/", views.GroupDetailView.as_view(), name="group_detail"),

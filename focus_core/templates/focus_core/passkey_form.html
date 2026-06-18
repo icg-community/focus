@@ -1,0 +1,28 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Rename passkey{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'account_safety' %}">Account safety</a></li>
+        <li>Rename passkey</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Account</p>
+    <h1>Rename passkey</h1>
+    <p>Choose a name that helps you recognize where this passkey is saved.</p>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.name %}
+        <div class="action-row">
+            <button type="submit" class="button">Save passkey name</button>
+            <a class="button button--secondary" href="{% url 'account_safety' %}">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

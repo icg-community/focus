@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 class FocusUserTests(TestCase):
@@ -322,6 +322,31 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("dev_sign_in"), response["Location"])
 
+    def test_account_management_actions_require_sign_in(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        identity = AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Laptop",
+        )
+
+        responses = [
+            self.client.post(reverse("linked_account_remove", kwargs={"pk": identity.pk})),
+            self.client.get(reverse("passkey_update", kwargs={"pk": passkey.pk})),
+            self.client.post(reverse("passkey_remove", kwargs={"pk": passkey.pk})),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(reverse("dev_sign_in"), response["Location"])
+
     def test_account_safety_shows_unused_backup_key_count(self):
         user = FocusUser.objects.create(display_name="Creator")
         RecoveryCode.create_for_code(user, "first-code")
@@ -368,6 +393,205 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(RecoveryCode.objects.filter(pk=old_code.pk).exists())
         self.assertEqual(user.recovery_codes.filter(used_at__isnull=True).count(), 8)
+
+    def test_account_safety_lists_connected_accounts_and_passkeys(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("account_safety"))
+
+        self.assertContains(response, "Connected accounts")
+        self.assertContains(response, "Discord")
+        self.assertContains(response, "creator_handle")
+        self.assertContains(response, "Passkeys")
+        self.assertContains(response, "Laptop")
+        self.assertContains(response, reverse("passkey_update", kwargs={"pk": passkey.pk}))
+        self.assertContains(response, "Connected sign-in accounts")
+        self.assertContains(response, "Saved passkeys")
+        self.assertContains(response, 'scope="col"')
+        self.assertContains(response, 'scope="row"')
+
+    def test_connected_account_can_be_removed_when_backup_key_exists(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        identity = AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        RecoveryCode.create_for_code(user, "backup-key")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("linked_account_remove", kwargs={"pk": identity.pk}),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Removed Discord: creator_handle.")
+        self.assertFalse(AuthIdentity.objects.filter(pk=identity.pk).exists())
+
+    def test_last_connected_account_cannot_be_removed_without_another_access_method(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        identity = AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("linked_account_remove", kwargs={"pk": identity.pk}),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Create backup keys or add another sign-in method before removing this connected account.")
+        self.assertTrue(AuthIdentity.objects.filter(pk=identity.pk).exists())
+
+    def test_connected_account_remove_rejects_other_users_account(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        identity = AuthIdentity.objects.create(
+            user=other_user,
+            provider="DISCORD",
+            subject_id="other-123",
+            handle="other_handle",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("linked_account_remove", kwargs={"pk": identity.pk}))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(AuthIdentity.objects.filter(pk=identity.pk).exists())
+
+    def test_passkey_name_can_be_updated(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Old laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("passkey_update", kwargs={"pk": passkey.pk}),
+            {"name": "New laptop"},
+        )
+
+        passkey.refresh_from_db()
+        self.assertRedirects(response, reverse("account_safety"))
+        self.assertEqual(passkey.name, "New laptop")
+
+    def test_passkey_name_errors_are_exposed_to_assistive_technology(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("passkey_update", kwargs={"pk": passkey.pk}),
+            {"name": "A" * 151},
+        )
+
+        passkey.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(passkey.name, "Laptop")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="name-error"')
+
+    def test_passkey_update_rejects_other_users_passkey(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        passkey = WebAuthnCredential.objects.create(
+            user=other_user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Other laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("passkey_update", kwargs={"pk": passkey.pk}),
+            {"name": "New name"},
+        )
+
+        passkey.refresh_from_db()
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(passkey.name, "Other laptop")
+
+    def test_passkey_can_be_removed_when_connected_account_exists(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="creator-123",
+            handle="creator_handle",
+        )
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_remove", kwargs={"pk": passkey.pk}), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Removed Laptop.")
+        self.assertFalse(WebAuthnCredential.objects.filter(pk=passkey.pk).exists())
+
+    def test_last_passkey_cannot_be_removed_without_another_access_method(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_remove", kwargs={"pk": passkey.pk}), follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Create backup keys or add another sign-in method before removing this passkey.")
+        self.assertTrue(WebAuthnCredential.objects.filter(pk=passkey.pk).exists())
+
+    def test_passkey_remove_rejects_other_users_passkey(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        passkey = WebAuthnCredential.objects.create(
+            user=other_user,
+            credential_id="credential-1",
+            public_key="public-key",
+            name="Other laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_remove", kwargs={"pk": passkey.pk}))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(WebAuthnCredential.objects.filter(pk=passkey.pk).exists())
 
     def test_group_detail_rejects_non_member(self):
         user = FocusUser.objects.create(display_name="Member")

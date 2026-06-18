@@ -13,7 +13,7 @@
 <div class="content-narrow">
     <p class="eyebrow">Account</p>
     <h1>Account safety</h1>
-    <p>Backup keys can help you get back in if your connected account or device stops working.</p>
+    <p>Backup keys, connected accounts, and passkeys can help you get back in if one sign-in method stops working.</p>
 
     {% if generated_codes %}
         <section class="section-block" aria-labelledby="new-backup-keys-heading">
@@ -37,13 +37,107 @@
         </form>
     </section>
 
-    <section class="section-block" aria-labelledby="other-options-heading">
-        <h2 id="other-options-heading">Other ways to avoid getting locked out</h2>
-        <ul>
-            <li>Connect more than one sign-in method when that option is available.</li>
-            <li>Use a device unlock sign-in when passkeys are available.</li>
-            <li>Keep at least one group owner active so production groups can continue if someone loses access.</li>
-        </ul>
+    <section class="section-block" aria-labelledby="connected-accounts-heading">
+        <h2 id="connected-accounts-heading">Connected accounts</h2>
+        <p>These accounts can identify you without FOCUS storing an email address or password.</p>
+        {% if identity_rows %}
+            <div class="table-wrap" role="region" aria-label="Connected accounts table" tabindex="0">
+                <table>
+                    <caption>Connected sign-in accounts</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Provider</th>
+                            <th scope="col">Handle</th>
+                            <th scope="col">Connected</th>
+                            <th scope="col">Last used</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in identity_rows %}
+                            <tr>
+                                <th scope="row">{{ row.identity.get_provider_display }}</th>
+                                <td>{{ row.identity.handle }}</td>
+                                <td>{{ row.identity.created_at|date:"M j, Y" }}</td>
+                                <td>
+                                    {% if row.identity.last_seen_at %}
+                                        {{ row.identity.last_seen_at|date:"M j, Y" }}
+                                    {% else %}
+                                        Not recorded yet
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if row.can_remove %}
+                                        <form method="post" action="{% url 'linked_account_remove' row.identity.pk %}" class="inline-form">
+                                            {% csrf_token %}
+                                            <button type="submit" class="button button--danger">Remove {{ row.identity.get_provider_display }} {{ row.identity.handle }}</button>
+                                        </form>
+                                    {% else %}
+                                        <p class="field-help">Create backup keys or add another sign-in method before removing this account.</p>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No connected accounts are recorded yet.</p>
+            </div>
+        {% endif %}
+    </section>
+
+    <section class="section-block" aria-labelledby="passkeys-heading">
+        <h2 id="passkeys-heading">Passkeys</h2>
+        <p>Passkeys let you sign in with a device unlock method, such as a fingerprint, face unlock, or screen lock.</p>
+        {% if passkey_rows %}
+            <div class="table-wrap" role="region" aria-label="Passkeys table" tabindex="0">
+                <table>
+                    <caption>Saved passkeys</caption>
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Last used</th>
+                            <th scope="col">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in passkey_rows %}
+                            <tr>
+                                <th scope="row">{{ row.display_name }}</th>
+                                <td>{{ row.passkey.created_at|date:"M j, Y" }}</td>
+                                <td>
+                                    {% if row.passkey.last_used_at %}
+                                        {{ row.passkey.last_used_at|date:"M j, Y" }}
+                                    {% else %}
+                                        Not recorded yet
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="table-actions">
+                                        <a href="{% url 'passkey_update' row.passkey.pk %}">Rename {{ row.display_name }}</a>
+                                        {% if row.can_remove %}
+                                            <form method="post" action="{% url 'passkey_remove' row.passkey.pk %}" class="inline-form">
+                                                {% csrf_token %}
+                                                <button type="submit" class="button button--danger">Remove {{ row.display_name }}</button>
+                                            </form>
+                                        {% else %}
+                                            <p class="field-help">Create backup keys or add another sign-in method before removing this passkey.</p>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>No passkeys are recorded yet.</p>
+            </div>
+        {% endif %}
     </section>
 </div>
 {% endblock %}

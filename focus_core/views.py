@@ -15,7 +15,7 @@ from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import DisplayNameForm, GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .forms import BackupKeySignInForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject
 
 
@@ -68,6 +68,30 @@ class DevSignInView(FormView):
         )
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
         return redirect(request.GET.get("next") or reverse("dashboard"))
+
+
+class BackupKeySignInView(FormView):
+    form_class = BackupKeySignInForm
+    template_name = "focus_core/backup_key_sign_in.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return redirect("dashboard")
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        backup_key = form.cleaned_data["backup_key"]
+        with transaction.atomic():
+            for recovery_code in RecoveryCode.objects.filter(used_at__isnull=True).select_related("user"):
+                if recovery_code.matches(backup_key):
+                    user = recovery_code.user
+                    recovery_code.mark_used()
+                    login(self.request, user, backend="django.contrib.auth.backends.ModelBackend")
+                    messages.success(self.request, "You are signed in. That backup key has now been used.")
+                    return redirect("dashboard")
+
+        form.add_error("backup_key", "That backup key did not work. Check it and try again.")
+        return self.form_invalid(form)
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):

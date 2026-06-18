@@ -1,0 +1,17 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Use a backup key{% endblock %}
+
+{% block content %}
+<div class="content-narrow">
+    <p class="eyebrow">Account recovery</p>
+    <h1>Use a backup key</h1>
+    <p>Use one of the backup keys you saved from Account safety. Each key works one time.</p>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.backup_key %}
+        <button type="submit" class="button">Sign in with backup key</button>
+    </form>
+</div>
+{% endblock %}

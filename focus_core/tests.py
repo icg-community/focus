@@ -116,6 +116,56 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Production groups")
         self.assertTrue(AuthIdentity.objects.filter(provider="GITHUB", subject_id="focus-dev-user").exists())
 
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_sign_in_links_to_backup_key_sign_in(self):
+        response = self.client.get(reverse("dev_sign_in"))
+
+        self.assertContains(response, "Use a saved backup key instead")
+        self.assertContains(response, reverse("backup_key_sign_in"))
+
+    def test_backup_key_sign_in_uses_unused_code_and_marks_it_used(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        recovery_code = RecoveryCode.create_for_code(user, "2345-6789-ABCD-EFGH")
+
+        response = self.client.post(reverse("backup_key_sign_in"), {"backup_key": "2345 6789 abcd efgh"})
+
+        recovery_code.refresh_from_db()
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertIsNotNone(recovery_code.used_at)
+
+        dashboard_response = self.client.get(reverse("dashboard"))
+        self.assertContains(dashboard_response, "Signed in as Creator")
+
+    def test_backup_key_sign_in_rejects_used_code(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        recovery_code = RecoveryCode.create_for_code(user, "2345-6789-ABCD-EFGH")
+        recovery_code.mark_used()
+
+        response = self.client.post(reverse("backup_key_sign_in"), {"backup_key": "2345-6789-ABCD-EFGH"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That backup key did not work. Check it and try again.")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="backup_key-error"')
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_backup_key_sign_in_rejects_unknown_code(self):
+        response = self.client.post(reverse("backup_key_sign_in"), {"backup_key": "UNKNOWN-BACKUP-KEY"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That backup key did not work. Check it and try again.")
+        self.assertContains(response, 'id="backup_key-error"')
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_backup_key_sign_in_redirects_signed_in_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("backup_key_sign_in"))
+
+        self.assertRedirects(response, reverse("dashboard"))
+
     def test_group_create_adds_current_user_as_owner(self):
         user = FocusUser.objects.create(display_name="Creator")
         self.client.force_login(user)

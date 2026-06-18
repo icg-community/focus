@@ -3,6 +3,24 @@ from django import forms
 from .models import FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject
 
 
+class AccessibleForm(forms.Form):
+    error_css_class = "field-error"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name, field in self.fields.items():
+            field.widget.attrs.setdefault("class", "field-control")
+            prefixed_name = self.add_prefix(name)
+            field.widget.attrs.setdefault("id", f"id_{prefixed_name}")
+            descriptions = [f"{prefixed_name}-help"]
+            if self.is_bound and name in self.errors:
+                descriptions.append(f"{prefixed_name}-error")
+                field.widget.attrs["aria-invalid"] = "true"
+            field.widget.attrs["aria-describedby"] = " ".join(descriptions)
+            if field.required:
+                field.widget.attrs["required"] = True
+
+
 class AccessibleModelForm(forms.ModelForm):
     error_css_class = "field-error"
 
@@ -24,6 +42,21 @@ class AccessibleModelForm(forms.ModelForm):
             field.widget.attrs["aria-describedby"] = " ".join(descriptions)
             if field.required:
                 field.widget.attrs["required"] = True
+
+
+class BackupKeySignInForm(AccessibleForm):
+    backup_key = forms.CharField(
+        label="Backup key",
+        help_text="Enter one saved backup key. Spaces and hyphens are okay.",
+        max_length=64,
+    )
+
+    def clean_backup_key(self):
+        value = self.cleaned_data["backup_key"]
+        compact_value = "".join(character for character in value.upper() if character not in " -\t\r\n")
+        if len(compact_value) == 16:
+            return "-".join(compact_value[index : index + 4] for index in range(0, 16, 4))
+        return value.strip().upper()
 
 
 class ProductionGroupForm(AccessibleModelForm):

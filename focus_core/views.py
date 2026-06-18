@@ -12,10 +12,11 @@ from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
-from webauthn import generate_registration_options, options_to_json, verify_registration_response
+from webauthn import generate_authentication_options, generate_registration_options, options_to_json, verify_authentication_response, verify_registration_response
 from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
 from webauthn.helpers.structs import (
     AttestationConveyancePreference,
@@ -34,6 +35,9 @@ RECOVERY_CODE_COUNT = 8
 PASSKEY_REGISTRATION_CHALLENGE_SESSION_KEY = "passkey_registration_challenge"
 PASSKEY_REGISTRATION_RP_ID_SESSION_KEY = "passkey_registration_rp_id"
 PASSKEY_REGISTRATION_ORIGIN_SESSION_KEY = "passkey_registration_origin"
+PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY = "passkey_authentication_challenge"
+PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY = "passkey_authentication_rp_id"
+PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
 
 
 def unique_group_slug(name):
@@ -138,6 +142,87 @@ class BackupKeySignInView(FormView):
 
         form.add_error("backup_key", "That backup key did not work. Check it and try again.")
         return self.form_invalid(form)
+
+
+class PasskeySignInView(TemplateView):
+    template_name = "focus_core/passkey_sign_in.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return redirect("dashboard")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["can_use_development_sign_in"] = settings.FOCUS_ENABLE_DEV_SIGN_IN
+        return context
+
+
+class PasskeyAuthenticationOptionsView(View):
+    def post(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
+
+        rp_id = request_rp_id(request)
+        origin = request_origin(request)
+        options = generate_authentication_options(
+            rp_id=rp_id,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        )
+
+        request.session[PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY] = bytes_to_base64url(options.challenge)
+        request.session[PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY] = rp_id
+        request.session[PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY] = origin
+        return JsonResponse(json.loads(options_to_json(options)))
+
+
+class PasskeyAuthenticationCompleteView(View):
+    def post(self, request, *args, **kwargs):
+        if request.user.is_authenticated:
+            return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
+
+        challenge = request.session.pop(PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY, None)
+        rp_id = request.session.pop(PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY, None)
+        origin = request.session.pop(PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY, None)
+        if not challenge or not rp_id or not origin:
+            return JsonResponse({"ok": False, "error": "Start passkey sign in again."}, status=400)
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JsonResponse({"ok": False, "error": "Passkey sign in did not send a valid response."}, status=400)
+
+        credential = payload.get("credential")
+        credential_id = (credential or {}).get("id") or (credential or {}).get("rawId")
+        if not credential or not credential_id:
+            return JsonResponse({"ok": False, "error": "Passkey sign in did not return a credential."}, status=400)
+
+        passkey = WebAuthnCredential.objects.filter(credential_id=credential_id).select_related("user").first()
+        if not passkey:
+            return JsonResponse({"ok": False, "error": "That passkey did not work. Try again."}, status=400)
+
+        try:
+            verification = verify_authentication_response(
+                credential=credential,
+                expected_challenge=base64url_to_bytes(challenge),
+                expected_rp_id=rp_id,
+                expected_origin=origin,
+                credential_public_key=base64url_to_bytes(passkey.public_key),
+                credential_current_sign_count=passkey.sign_count,
+                require_user_verification=True,
+            )
+        except Exception:
+            return JsonResponse({"ok": False, "error": "That passkey did not work. Try again."}, status=400)
+
+        if bytes_to_base64url(verification.credential_id) != passkey.credential_id:
+            return JsonResponse({"ok": False, "error": "That passkey did not work. Try again."}, status=400)
+
+        passkey.sign_count = verification.new_sign_count
+        passkey.last_used_at = timezone.now()
+        passkey.save(update_fields=["sign_count", "last_used_at"])
+        login(request, passkey.user, backend="django.contrib.auth.backends.ModelBackend")
+        messages.success(request, "You are signed in with a passkey.")
+        return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):

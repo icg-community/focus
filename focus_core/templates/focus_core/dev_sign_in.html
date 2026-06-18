@@ -10,6 +10,7 @@
         {% csrf_token %}
         <button type="submit" class="button">Start development session</button>
     </form>
+    <p><a href="{% url 'passkey_sign_in' %}">Use a passkey instead</a></p>
     <p><a href="{% url 'backup_key_sign_in' %}">Use a saved backup key instead</a></p>
 </div>
 {% endblock %}

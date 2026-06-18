@@ -1,0 +1,152 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Use a passkey{% endblock %}
+
+{% block content %}
+<div class="content-narrow">
+    <p class="eyebrow">Sign in</p>
+    <h1>Use a passkey</h1>
+    <p>Use your device unlock method to sign in with a passkey saved for this FOCUS account.</p>
+    <form method="post" class="form-stack" novalidate id="passkey-sign-in-form">
+        {% csrf_token %}
+        <p id="passkey-sign-in-status" role="status" aria-live="polite" aria-atomic="true">Press Sign in with passkey to begin.</p>
+        <p id="passkey-sign-in-error" role="alert" aria-atomic="true"></p>
+        <div class="action-row">
+            <button type="button" class="button" id="passkey-sign-in-button">Sign in with passkey</button>
+        </div>
+        <noscript>
+            <p class="field-errors">Error: Passkey sign in needs JavaScript and a browser that supports passkeys.</p>
+        </noscript>
+    </form>
+    <p><a href="{% url 'backup_key_sign_in' %}">Use a backup key instead</a></p>
+    {% if can_use_development_sign_in %}
+        <p><a href="{% url 'dev_sign_in' %}">Use development sign in instead</a></p>
+    {% endif %}
+</div>
+
+<script>
+(() => {
+    const form = document.getElementById("passkey-sign-in-form");
+    const button = document.getElementById("passkey-sign-in-button");
+    const status = document.getElementById("passkey-sign-in-status");
+    const errorMessage = document.getElementById("passkey-sign-in-error");
+
+    function setStatus(message) {
+        status.textContent = message;
+    }
+
+    function setError(message) {
+        errorMessage.textContent = message;
+    }
+
+    function base64urlToBuffer(value) {
+        const padding = "=".repeat((4 - value.length % 4) % 4);
+        const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const raw = window.atob(base64);
+        const buffer = new ArrayBuffer(raw.length);
+        const bytes = new Uint8Array(buffer);
+        for (let index = 0; index < raw.length; index += 1) {
+            bytes[index] = raw.charCodeAt(index);
+        }
+        return buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let index = 0; index < bytes.byteLength; index += 1) {
+            binary += String.fromCharCode(bytes[index]);
+        }
+        return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    }
+
+    function prepareRequestOptions(options) {
+        options.challenge = base64urlToBuffer(options.challenge);
+        if (options.allowCredentials) {
+            options.allowCredentials = options.allowCredentials.map((credential) => ({
+                ...credential,
+                id: base64urlToBuffer(credential.id),
+            }));
+        }
+        return options;
+    }
+
+    function credentialToJson(credential) {
+        const response = credential.response;
+        const jsonCredential = {
+            id: credential.id,
+            rawId: bufferToBase64url(credential.rawId),
+            type: credential.type,
+            response: {
+                authenticatorData: bufferToBase64url(response.authenticatorData),
+                clientDataJSON: bufferToBase64url(response.clientDataJSON),
+                signature: bufferToBase64url(response.signature),
+            },
+            clientExtensionResults: credential.getClientExtensionResults(),
+        };
+        if (response.userHandle) {
+            jsonCredential.response.userHandle = bufferToBase64url(response.userHandle);
+        }
+        if (credential.authenticatorAttachment) {
+            jsonCredential.authenticatorAttachment = credential.authenticatorAttachment;
+        }
+        return jsonCredential;
+    }
+
+    async function fetchJson(url, body) {
+        const response = await window.fetch(url, {
+            method: "POST",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": form.querySelector("[name=csrfmiddlewaretoken]").value,
+            },
+            body: body ? JSON.stringify(body) : "{}",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "Passkey sign in failed. Try again.");
+        }
+        return data;
+    }
+
+    async function signInWithPasskey() {
+        setError("");
+        button.disabled = true;
+        setStatus("Starting passkey sign in.");
+        try {
+            const options = await fetchJson("{% url 'passkey_authentication_options' %}");
+            if (options.redirect_url) {
+                window.location.href = options.redirect_url;
+                return;
+            }
+            setStatus("Use your device prompt to choose a passkey.");
+            const credential = await navigator.credentials.get({
+                publicKey: prepareRequestOptions(options),
+            });
+            if (!credential) {
+                throw new Error("Passkey sign in was cancelled.");
+            }
+            setStatus("Checking passkey.");
+            const result = await fetchJson("{% url 'passkey_authentication_complete' %}", {
+                credential: credentialToJson(credential),
+            });
+            setStatus("Signed in. Opening dashboard.");
+            window.location.href = result.redirect_url;
+        } catch (error) {
+            setStatus("Passkey sign in did not finish.");
+            setError(error.message || "Passkey sign in failed. Try again.");
+            button.disabled = false;
+        }
+    }
+
+    if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.get) {
+        button.disabled = true;
+        setStatus("This browser does not support passkey sign in. Use a backup key or connected account instead.");
+        return;
+    }
+
+    button.addEventListener("click", signInWithPasskey);
+})();
+</script>
+{% endblock %}

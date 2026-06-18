@@ -125,8 +125,144 @@ class ProductionFlowTests(TestCase):
     def test_development_sign_in_links_to_backup_key_sign_in(self):
         response = self.client.get(reverse("dev_sign_in"))
 
+        self.assertContains(response, "Use a passkey instead")
+        self.assertContains(response, reverse("passkey_sign_in"))
         self.assertContains(response, "Use a saved backup key instead")
         self.assertContains(response, reverse("backup_key_sign_in"))
+
+    def test_passkey_sign_in_page_has_accessible_status_and_fallback_links(self):
+        response = self.client.get(reverse("passkey_sign_in"))
+
+        self.assertContains(response, "Use a passkey")
+        self.assertContains(response, "Sign in with passkey")
+        self.assertContains(response, 'role="status"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, "Passkey sign in needs JavaScript")
+        self.assertContains(response, reverse("backup_key_sign_in"))
+        self.assertContains(response, reverse("dev_sign_in"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
+    def test_passkey_sign_in_page_hides_development_link_when_disabled(self):
+        response = self.client.get(reverse("passkey_sign_in"))
+
+        self.assertContains(response, reverse("backup_key_sign_in"))
+        self.assertNotContains(response, "Use development sign in instead")
+        self.assertNotContains(response, reverse("dev_sign_in"))
+
+    def test_passkey_sign_in_redirects_signed_in_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("passkey_sign_in"))
+
+        self.assertRedirects(response, reverse("dashboard"))
+
+    def test_passkey_authentication_options_store_challenge_without_account_identifier(self):
+        response = self.client.post(reverse("passkey_authentication_options"))
+        data = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["rpId"], "testserver")
+        self.assertEqual(data["userVerification"], "required")
+        self.assertEqual(data["allowCredentials"], [])
+        self.assertNotIn("user", data)
+        self.assertIn("challenge", data)
+        self.assertEqual(self.client.session["passkey_authentication_challenge"], data["challenge"])
+        self.assertEqual(self.client.session["passkey_authentication_rp_id"], "testserver")
+        self.assertEqual(self.client.session["passkey_authentication_origin"], "http://testserver")
+
+    def test_passkey_authentication_complete_signs_in_and_updates_passkey(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        passkey = WebAuthnCredential.objects.create(
+            user=user,
+            credential_id=bytes_to_base64url(b"credential-id"),
+            public_key=bytes_to_base64url(b"public-key"),
+            name="Laptop",
+            sign_count=7,
+        )
+        session = self.client.session
+        session["passkey_authentication_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_authentication_rp_id"] = "testserver"
+        session["passkey_authentication_origin"] = "http://testserver"
+        session.save()
+        verification = SimpleNamespace(
+            credential_id=b"credential-id",
+            new_sign_count=8,
+        )
+
+        with patch("focus_core.views.verify_authentication_response", return_value=verification) as verify_authentication:
+            response = self.client.post(
+                reverse("passkey_authentication_complete"),
+                data=json.dumps({"credential": {"id": bytes_to_base64url(b"credential-id")}}),
+                content_type="application/json",
+            )
+
+        passkey.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["redirect_url"], reverse("dashboard"))
+        self.assertEqual(self.client.session["_auth_user_id"], str(user.pk))
+        self.assertEqual(passkey.sign_count, 8)
+        self.assertIsNotNone(passkey.last_used_at)
+        verify_authentication.assert_called_once()
+        self.assertNotIn("passkey_authentication_challenge", self.client.session)
+
+    def test_passkey_authentication_complete_rejects_unknown_credential(self):
+        session = self.client.session
+        session["passkey_authentication_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_authentication_rp_id"] = "testserver"
+        session["passkey_authentication_origin"] = "http://testserver"
+        session.save()
+
+        response = self.client.post(
+            reverse("passkey_authentication_complete"),
+            data=json.dumps({"credential": {"id": bytes_to_base64url(b"unknown-credential")}}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"], "That passkey did not work. Try again.")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_passkey_authentication_complete_rejects_missing_challenge(self):
+        response = self.client.post(
+            reverse("passkey_authentication_complete"),
+            data=json.dumps({"credential": {"id": bytes_to_base64url(b"credential-id")}}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"], "Start passkey sign in again.")
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_passkey_authentication_complete_rejects_verification_failure(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        WebAuthnCredential.objects.create(
+            user=user,
+            credential_id=bytes_to_base64url(b"credential-id"),
+            public_key=bytes_to_base64url(b"public-key"),
+            name="Laptop",
+            sign_count=7,
+        )
+        session = self.client.session
+        session["passkey_authentication_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_authentication_rp_id"] = "testserver"
+        session["passkey_authentication_origin"] = "http://testserver"
+        session.save()
+
+        with patch("focus_core.views.verify_authentication_response", side_effect=ValueError("bad credential")):
+            response = self.client.post(
+                reverse("passkey_authentication_complete"),
+                data=json.dumps({"credential": {"id": bytes_to_base64url(b"credential-id")}}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"], "That passkey did not work. Try again.")
+        self.assertNotIn("_auth_user_id", self.client.session)
 
     def test_backup_key_sign_in_uses_unused_code_and_marks_it_used(self):
         user = FocusUser.objects.create(display_name="Creator")
@@ -170,6 +306,12 @@ class ProductionFlowTests(TestCase):
         response = self.client.get(reverse("backup_key_sign_in"))
 
         self.assertRedirects(response, reverse("dashboard"))
+
+    def test_backup_key_sign_in_links_to_passkey_sign_in(self):
+        response = self.client.get(reverse("backup_key_sign_in"))
+
+        self.assertContains(response, "Use a passkey instead")
+        self.assertContains(response, reverse("passkey_sign_in"))
 
     def test_group_create_adds_current_user_as_owner(self):
         user = FocusUser.objects.create(display_name="Creator")

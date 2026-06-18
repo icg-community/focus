@@ -8,6 +8,9 @@ urlpatterns = [
     path("", views.DashboardView.as_view(), name="dashboard"),
     path("dev/sign-in/", views.DevSignInView.as_view(), name="dev_sign_in"),
     path("backup-key/sign-in/", views.BackupKeySignInView.as_view(), name="backup_key_sign_in"),
+    path("passkey/sign-in/", views.PasskeySignInView.as_view(), name="passkey_sign_in"),
+    path("passkey/sign-in/options/", views.PasskeyAuthenticationOptionsView.as_view(), name="passkey_authentication_options"),
+    path("passkey/sign-in/complete/", views.PasskeyAuthenticationCompleteView.as_view(), name="passkey_authentication_complete"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("account/safety/", views.AccountSafetyView.as_view(), name="account_safety"),
     path(

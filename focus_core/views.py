@@ -15,7 +15,7 @@ from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import BackupKeySignInForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
 
@@ -43,6 +43,11 @@ def generate_recovery_code():
         for _ in range(4)
     ]
     return "-".join(parts)
+
+
+def development_subject_id(provider, handle):
+    normalized_handle = slugify(handle) or "account"
+    return f"dev-{provider.lower()}-{normalized_handle}"
 
 
 def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
@@ -164,6 +169,7 @@ class AccountSafetyView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user = self.request.user
+        context["can_connect_development_account"] = settings.FOCUS_ENABLE_DEV_SIGN_IN
         context["unused_recovery_code_count"] = user.recovery_codes.filter(used_at__isnull=True).count()
         context["identity_rows"] = [
             {
@@ -193,6 +199,39 @@ class AccountSafetyView(LoginRequiredMixin, TemplateView):
         context["unused_recovery_code_count"] = len(codes)
         messages.success(request, "New backup keys created. Save them now, because they will not be shown again.")
         return self.render_to_response(context)
+
+
+class DevelopmentLinkedAccountCreateView(LoginRequiredMixin, FormView):
+    form_class = DevelopmentLinkedAccountForm
+    template_name = "focus_core/dev_linked_account_form.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.FOCUS_ENABLE_DEV_SIGN_IN:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        provider = form.cleaned_data["provider"]
+        handle = form.cleaned_data["handle"]
+        subject_id = development_subject_id(provider, handle)
+        existing_identity = AuthIdentity.objects.filter(provider=provider, subject_id=subject_id).first()
+
+        if existing_identity and existing_identity.user == self.request.user:
+            form.add_error("handle", "That development account is already connected.")
+            return self.form_invalid(form)
+
+        if existing_identity:
+            form.add_error("handle", "That development account is already connected to another FOCUS user.")
+            return self.form_invalid(form)
+
+        identity = AuthIdentity.objects.create(
+            user=self.request.user,
+            provider=provider,
+            subject_id=subject_id,
+            handle=handle,
+        )
+        messages.success(self.request, f"Connected {identity.get_provider_display()} {identity.handle}.")
+        return redirect("account_safety")
 
 
 class LinkedAccountRemoveView(LoginRequiredMixin, View):

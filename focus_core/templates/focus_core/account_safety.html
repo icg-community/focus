@@ -40,6 +40,9 @@
     <section class="section-block" aria-labelledby="connected-accounts-heading">
         <h2 id="connected-accounts-heading">Connected accounts</h2>
         <p>These accounts can identify you without FOCUS storing an email address or password.</p>
+        {% if can_connect_development_account %}
+            <p><a class="button button--secondary" href="{% url 'development_linked_account_create' %}">Connect development account</a></p>
+        {% endif %}
         {% if identity_rows %}
             <div class="table-wrap" role="region" aria-label="Connected accounts table" tabindex="0">
                 <table>

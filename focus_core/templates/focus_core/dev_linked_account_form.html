@@ -1,0 +1,29 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Connect development account{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'account_safety' %}">Account safety</a></li>
+        <li>Connect development account</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Development</p>
+    <h1>Connect development account</h1>
+    <p>This local-only helper simulates connecting another provider account without storing an email or password.</p>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.provider %}
+        {% include "focus_core/includes/field.html" with field=form.handle %}
+        <div class="action-row">
+            <button type="submit" class="button">Connect development account</button>
+            <a class="button button--secondary" href="{% url 'account_safety' %}">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

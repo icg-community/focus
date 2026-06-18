@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject, WebAuthnCredential
 
 
 class AccessibleForm(forms.Form):
@@ -57,6 +57,22 @@ class BackupKeySignInForm(AccessibleForm):
         if len(compact_value) == 16:
             return "-".join(compact_value[index : index + 4] for index in range(0, 16, 4))
         return value.strip().upper()
+
+
+class DevelopmentLinkedAccountForm(AccessibleForm):
+    provider = forms.ChoiceField(
+        choices=AuthIdentity.PROVIDER_CHOICES,
+        label="Provider",
+        help_text="Choose the provider to simulate for local development.",
+    )
+    handle = forms.CharField(
+        label="Provider handle",
+        help_text="Use the public username or handle this provider would send back.",
+        max_length=255,
+    )
+
+    def clean_handle(self):
+        return self.cleaned_data["handle"].strip()
 
 
 class ProductionGroupForm(AccessibleModelForm):

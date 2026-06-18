@@ -423,6 +423,115 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, 'scope="col"')
         self.assertContains(response, 'scope="row"')
 
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_account_safety_links_to_development_account_connection_when_enabled(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("account_safety"))
+
+        self.assertContains(response, "Connect development account")
+        self.assertContains(response, reverse("development_linked_account_create"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
+    def test_account_safety_hides_development_account_connection_when_disabled(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("account_safety"))
+
+        self.assertNotContains(response, "Connect development account")
+        self.assertNotContains(response, reverse("development_linked_account_create"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_account_connection_requires_sign_in(self):
+        response = self.client.get(reverse("development_linked_account_create"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dev_sign_in"), response["Location"])
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
+    def test_development_account_connection_is_unavailable_when_disabled(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("development_linked_account_create"))
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_account_connection_adds_provider_identity(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("development_linked_account_create"),
+            {"provider": "DISCORD", "handle": "creator_handle"},
+        )
+
+        identity = AuthIdentity.objects.get(user=user, provider="DISCORD")
+        self.assertRedirects(response, reverse("account_safety"))
+        self.assertEqual(identity.handle, "creator_handle")
+        self.assertEqual(identity.subject_id, "dev-discord-creator_handle")
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_account_connection_blocks_duplicate_for_current_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="dev-discord-creator_handle",
+            handle="creator_handle",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("development_linked_account_create"),
+            {"provider": "DISCORD", "handle": "creator_handle"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That development account is already connected.")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="handle-error"')
+        self.assertEqual(AuthIdentity.objects.filter(user=user, provider="DISCORD").count(), 1)
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_account_connection_blocks_identity_owned_by_another_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        AuthIdentity.objects.create(
+            user=other_user,
+            provider="DISCORD",
+            subject_id="dev-discord-creator_handle",
+            handle="creator_handle",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("development_linked_account_create"),
+            {"provider": "DISCORD", "handle": "creator_handle"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "That development account is already connected to another FOCUS user.")
+        self.assertFalse(AuthIdentity.objects.filter(user=user, provider="DISCORD").exists())
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_account_connection_rejects_unknown_provider(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("development_linked_account_create"),
+            {"provider": "UNKNOWN", "handle": "creator_handle"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="provider-error"')
+        self.assertFalse(AuthIdentity.objects.filter(user=user).exists())
+
     def test_connected_account_can_be_removed_when_backup_key_exists(self):
         user = FocusUser.objects.create(display_name="Creator")
         identity = AuthIdentity.objects.create(

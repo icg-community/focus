@@ -11,6 +11,11 @@ urlpatterns = [
     path("profile/", views.ProfileView.as_view(), name="profile"),
     path("account/safety/", views.AccountSafetyView.as_view(), name="account_safety"),
     path(
+        "account/linked-accounts/development/new/",
+        views.DevelopmentLinkedAccountCreateView.as_view(),
+        name="development_linked_account_create",
+    ),
+    path(
         "account/linked-accounts/<int:pk>/remove/",
         views.LinkedAccountRemoveView.as_view(),
         name="linked_account_remove",

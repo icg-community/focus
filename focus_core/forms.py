@@ -93,6 +93,18 @@ class GroupInvitationForm(AccessibleModelForm):
         }
 
 
+class ProjectStatusForm(AccessibleModelForm):
+    class Meta:
+        model = VideoProject
+        fields = ["status"]
+        labels = {
+            "status": "Pipeline status",
+        }
+        help_texts = {
+            "status": "Choose the current stage for this project.",
+        }
+
+
 class MembershipRoleForm(AccessibleModelForm):
     class Meta:
         model = Membership

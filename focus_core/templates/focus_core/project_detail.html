@@ -23,6 +23,12 @@
 
 <section class="section-block">
     <h2>Project details</h2>
+    {% include "focus_core/includes/form_errors.html" with form=status_form %}
+    <form method="post" action="{% url 'project_status_update' group.slug object.pk %}" class="status-form">
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=status_form.status %}
+        <button type="submit" class="button">Update status</button>
+    </form>
     <dl class="detail-list">
         <div>
             <dt>Status</dt>

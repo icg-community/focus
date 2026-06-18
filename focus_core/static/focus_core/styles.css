@@ -387,6 +387,13 @@ textarea.field-control {
     gap: 0.75rem;
 }
 
+.status-form {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    max-width: 28rem;
+}
+
 .detail-list {
     display: grid;
     gap: 1rem;

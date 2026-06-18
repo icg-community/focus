@@ -361,6 +361,64 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Open script for Launch Video")
         self.assertContains(response, editor.public_name)
         self.assertContains(response, writer.public_name)
+        self.assertContains(response, reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertContains(response, "Update status")
+
+    def test_group_member_can_update_project_status_from_detail_page(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+        )
+        self.client.force_login(producer)
+
+        response = self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        project.refresh_from_db()
+        self.assertRedirects(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertEqual(project.status, VideoProject.Status.REVIEW)
+
+    def test_project_status_update_errors_are_exposed_to_assistive_technology(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(producer)
+
+        response = self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": "NOT_A_STATUS"},
+        )
+
+        project.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(project.status, VideoProject.Status.IDEA)
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="status-error"')
+
+    def test_non_member_cannot_update_project_status(self):
+        member = FocusUser.objects.create(display_name="Member")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=member, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        project.refresh_from_db()
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(project.status, VideoProject.Status.IDEA)
 
     def test_project_detail_rejects_non_member(self):
         member = FocusUser.objects.create(display_name="Member")

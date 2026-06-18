@@ -12,7 +12,7 @@ from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, VideoProjectForm
+from .forms import GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, VideoProject
 
 
@@ -336,7 +336,38 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["group"] = self.object.group
+        context.setdefault("status_form", ProjectStatusForm(instance=self.object))
         return context
+
+
+class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
+    model = VideoProject
+    form_class = ProjectStatusForm
+    template_name = "focus_core/project_detail.html"
+
+    def get_queryset(self):
+        return (
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            )
+            .select_related("group")
+            .prefetch_related("assigned_editors", "assigned_writers")
+        )
+
+    def form_valid(self, form):
+        response = super().form_valid(form)
+        messages.success(self.request, f"Updated {self.object.title}'s status.")
+        return response
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["group"] = self.object.group
+        context["status_form"] = context["form"]
+        return context
+
+    def get_success_url(self):
+        return reverse("project_detail", kwargs={"group_slug": self.object.group.slug, "pk": self.object.pk})
 
 
 class ProjectUpdateView(LoginRequiredMixin, UpdateView):

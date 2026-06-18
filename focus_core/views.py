@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
@@ -59,7 +60,30 @@ class DashboardView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["groups"] = ProductionGroup.objects.filter(members__user=self.request.user).order_by("name")
+        user = self.request.user
+        assigned_projects = (
+            VideoProject.objects.filter(group__members__user=user)
+            .filter(Q(assigned_editors=user) | Q(assigned_writers=user))
+            .select_related("group")
+            .prefetch_related("assigned_editors", "assigned_writers")
+            .distinct()
+            .order_by("-updated_at", "title")
+        )
+        context["groups"] = ProductionGroup.objects.filter(members__user=user).order_by("name")
+        context["assignment_rows"] = [
+            {
+                "project": project,
+                "roles": [
+                    role
+                    for role, assignees in (
+                        ("Editor", project.assigned_editors.all()),
+                        ("Writer", project.assigned_writers.all()),
+                    )
+                    if user in assignees
+                ],
+            }
+            for project in assigned_projects
+        ]
         return context
 
 

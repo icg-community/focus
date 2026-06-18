@@ -133,6 +133,41 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Visible Studio")
         self.assertNotContains(response, "Hidden Studio")
 
+    def test_dashboard_shows_current_user_assignments_once(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video", status=VideoProject.Status.EDITING)
+        project.assigned_editors.add(user)
+        project.assigned_writers.add(user)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Projects assigned to Creator")
+        self.assertContains(response, "Launch Video", count=1)
+        self.assertContains(response, "Editor, Writer")
+        self.assertContains(response, "Currently Being Edited")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+    def test_dashboard_does_not_show_assignments_outside_user_groups(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        hidden_group = ProductionGroup.objects.create(name="Hidden Studio", slug="hidden-studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        visible_project = VideoProject.objects.create(group=group, title="Visible Assignment")
+        hidden_project = VideoProject.objects.create(group=hidden_group, title="Hidden Assignment")
+        visible_project.assigned_writers.add(user)
+        hidden_project.assigned_writers.add(user)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Visible Assignment")
+        self.assertContains(response, "Writer")
+        self.assertNotContains(response, "Hidden Assignment")
+        self.assertNotContains(response, "Hidden Studio")
+
     def test_group_detail_rejects_non_member(self):
         user = FocusUser.objects.create(display_name="Member")
         group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")

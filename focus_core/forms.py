@@ -120,6 +120,15 @@ class PasskeyNameForm(AccessibleModelForm):
         }
 
 
+class PasskeyRegistrationForm(AccessibleForm):
+    name = forms.CharField(
+        label="Passkey name",
+        help_text="Optional. Use a name that helps you recognize this device, such as Laptop or Phone.",
+        max_length=150,
+        required=False,
+    )
+
+
 class VideoProjectForm(AccessibleModelForm):
     def __init__(self, *args, group=None, **kwargs):
         super().__init__(*args, **kwargs)

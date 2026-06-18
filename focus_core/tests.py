@@ -1,6 +1,11 @@
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from webauthn.helpers import bytes_to_base64url
 
 from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
@@ -347,6 +352,17 @@ class ProductionFlowTests(TestCase):
             self.assertEqual(response.status_code, 302)
             self.assertIn(reverse("dev_sign_in"), response["Location"])
 
+    def test_passkey_registration_routes_require_sign_in(self):
+        responses = [
+            self.client.get(reverse("passkey_register")),
+            self.client.post(reverse("passkey_registration_options")),
+            self.client.post(reverse("passkey_registration_complete")),
+        ]
+
+        for response in responses:
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(reverse("dev_sign_in"), response["Location"])
+
     def test_account_safety_shows_unused_backup_key_count(self):
         user = FocusUser.objects.create(display_name="Creator")
         RecoveryCode.create_for_code(user, "first-code")
@@ -417,11 +433,172 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "creator_handle")
         self.assertContains(response, "Passkeys")
         self.assertContains(response, "Laptop")
+        self.assertContains(response, "Add passkey")
+        self.assertContains(response, reverse("passkey_register"))
         self.assertContains(response, reverse("passkey_update", kwargs={"pk": passkey.pk}))
         self.assertContains(response, "Connected sign-in accounts")
         self.assertContains(response, "Saved passkeys")
         self.assertContains(response, 'scope="col"')
         self.assertContains(response, 'scope="row"')
+
+    def test_passkey_registration_page_has_accessible_status_and_form(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("passkey_register"))
+
+        self.assertContains(response, "Add passkey")
+        self.assertContains(response, "Passkey name")
+        self.assertContains(response, 'role="status"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'id="name-help"')
+        self.assertContains(response, 'aria-describedby="name-help"')
+        self.assertContains(response, "Passkey setup needs JavaScript")
+
+    def test_passkey_registration_plain_form_post_redirects_to_page(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_register"), data={"name": "Laptop"})
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("passkey_register"))
+        self.assertFalse(WebAuthnCredential.objects.filter(user=user).exists())
+
+    def test_passkey_registration_options_store_challenge_and_return_public_key_options(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_registration_options"))
+        data = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["rp"]["name"], "FOCUS")
+        self.assertEqual(data["rp"]["id"], "testserver")
+        self.assertEqual(data["user"]["name"], f"focus-user-{user.pk}")
+        self.assertEqual(data["user"]["displayName"], "Creator")
+        self.assertEqual(data["authenticatorSelection"]["residentKey"], "required")
+        self.assertEqual(data["authenticatorSelection"]["userVerification"], "required")
+        self.assertEqual(data["attestation"], "none")
+        self.assertIn("challenge", data)
+        self.assertEqual(self.client.session["passkey_registration_challenge"], data["challenge"])
+        self.assertEqual(self.client.session["passkey_registration_rp_id"], "testserver")
+        self.assertEqual(self.client.session["passkey_registration_origin"], "http://testserver")
+
+    def test_passkey_registration_options_exclude_existing_credentials(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        WebAuthnCredential.objects.create(
+            user=user,
+            credential_id=bytes_to_base64url(b"existing-credential"),
+            public_key="public-key",
+            name="Laptop",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("passkey_registration_options"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["excludeCredentials"][0]["id"], bytes_to_base64url(b"existing-credential"))
+
+    def test_passkey_registration_complete_creates_passkey(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+        session = self.client.session
+        session["passkey_registration_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_registration_rp_id"] = "testserver"
+        session["passkey_registration_origin"] = "http://testserver"
+        session.save()
+        verification = SimpleNamespace(
+            credential_id=b"credential-id",
+            credential_public_key=b"public-key",
+            sign_count=7,
+        )
+
+        with patch("focus_core.views.verify_registration_response", return_value=verification) as verify_registration:
+            response = self.client.post(
+                reverse("passkey_registration_complete"),
+                data=json.dumps({"credential": {"id": "credential"}, "name": "Laptop"}),
+                content_type="application/json",
+            )
+
+        passkey = WebAuthnCredential.objects.get(user=user)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["redirect_url"], reverse("account_safety"))
+        self.assertEqual(passkey.credential_id, bytes_to_base64url(b"credential-id"))
+        self.assertEqual(passkey.public_key, bytes_to_base64url(b"public-key"))
+        self.assertEqual(passkey.name, "Laptop")
+        self.assertEqual(passkey.sign_count, 7)
+        verify_registration.assert_called_once()
+        self.assertNotIn("passkey_registration_challenge", self.client.session)
+
+    def test_passkey_registration_complete_rejects_duplicate_credential(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        WebAuthnCredential.objects.create(
+            user=user,
+            credential_id=bytes_to_base64url(b"credential-id"),
+            public_key="public-key",
+            name="Existing",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["passkey_registration_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_registration_rp_id"] = "testserver"
+        session["passkey_registration_origin"] = "http://testserver"
+        session.save()
+        verification = SimpleNamespace(
+            credential_id=b"credential-id",
+            credential_public_key=b"public-key",
+            sign_count=7,
+        )
+
+        with patch("focus_core.views.verify_registration_response", return_value=verification):
+            response = self.client.post(
+                reverse("passkey_registration_complete"),
+                data=json.dumps({"credential": {"id": "credential"}, "name": "Laptop"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertContains(response, "That passkey is already connected.", status_code=400)
+        self.assertEqual(WebAuthnCredential.objects.filter(user=user).count(), 1)
+
+    def test_passkey_registration_complete_rejects_missing_challenge(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("passkey_registration_complete"),
+            data=json.dumps({"credential": {"id": "credential"}, "name": "Laptop"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"], "Start passkey setup again.")
+        self.assertFalse(WebAuthnCredential.objects.filter(user=user).exists())
+
+    def test_passkey_registration_complete_rejects_verification_failure(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+        session = self.client.session
+        session["passkey_registration_challenge"] = bytes_to_base64url(b"challenge")
+        session["passkey_registration_rp_id"] = "testserver"
+        session["passkey_registration_origin"] = "http://testserver"
+        session.save()
+
+        with patch("focus_core.views.verify_registration_response", side_effect=ValueError("bad credential")):
+            response = self.client.post(
+                reverse("passkey_registration_complete"),
+                data=json.dumps({"credential": {"id": "credential"}, "name": "Laptop"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertEqual(response.json()["error"], "Passkey setup could not be verified. Try again.")
+        self.assertFalse(WebAuthnCredential.objects.filter(user=user).exists())
 
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
     def test_account_safety_links_to_development_account_connection_when_enabled(self):

@@ -94,6 +94,7 @@
     <section class="section-block" aria-labelledby="passkeys-heading">
         <h2 id="passkeys-heading">Passkeys</h2>
         <p>Passkeys let you sign in with a device unlock method, such as a fingerprint, face unlock, or screen lock.</p>
+        <p><a class="button button--secondary" href="{% url 'passkey_register' %}">Add passkey</a></p>
         {% if passkey_rows %}
             <div class="table-wrap" role="region" aria-label="Passkeys table" tabindex="0">
                 <table>

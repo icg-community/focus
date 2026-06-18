@@ -5,6 +5,7 @@ description = "Privacy-first production management hub for content creation team
 requires-python = ">=3.12"
 dependencies = [
     "Django>=5.0,<6.0",
+    "webauthn>=2.2,<3.0",
 ]
 
 [build-system]

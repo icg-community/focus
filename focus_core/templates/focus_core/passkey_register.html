@@ -1,0 +1,156 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Add passkey{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'account_safety' %}">Account safety</a></li>
+        <li>Add passkey</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Account</p>
+    <h1>Add passkey</h1>
+    <p>Use your device unlock method to create a passkey for this FOCUS account. Your device keeps the private key; FOCUS stores only the public key needed to recognize it later.</p>
+    <form method="post" class="form-stack" novalidate id="passkey-registration-form">
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.name %}
+        <p id="passkey-registration-status" role="status" aria-live="polite" aria-atomic="true">Press Add passkey to begin.</p>
+        <p id="passkey-registration-error" role="alert" aria-atomic="true"></p>
+        <div class="action-row">
+            <button type="button" class="button" id="passkey-registration-button">Add passkey</button>
+            <a class="button button--secondary" href="{% url 'account_safety' %}">Cancel</a>
+        </div>
+        <noscript>
+            <p class="field-errors">Error: Passkey setup needs JavaScript and a browser that supports passkeys.</p>
+        </noscript>
+    </form>
+</div>
+
+<script>
+(() => {
+    const form = document.getElementById("passkey-registration-form");
+    const button = document.getElementById("passkey-registration-button");
+    const status = document.getElementById("passkey-registration-status");
+    const errorMessage = document.getElementById("passkey-registration-error");
+    const nameInput = document.getElementById("id_name");
+
+    function setStatus(message) {
+        status.textContent = message;
+    }
+
+    function setError(message) {
+        errorMessage.textContent = message;
+    }
+
+    function base64urlToBuffer(value) {
+        const padding = "=".repeat((4 - value.length % 4) % 4);
+        const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const raw = window.atob(base64);
+        const buffer = new ArrayBuffer(raw.length);
+        const bytes = new Uint8Array(buffer);
+        for (let index = 0; index < raw.length; index += 1) {
+            bytes[index] = raw.charCodeAt(index);
+        }
+        return buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let index = 0; index < bytes.byteLength; index += 1) {
+            binary += String.fromCharCode(bytes[index]);
+        }
+        return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    }
+
+    function prepareCreationOptions(options) {
+        options.challenge = base64urlToBuffer(options.challenge);
+        options.user.id = base64urlToBuffer(options.user.id);
+        if (options.excludeCredentials) {
+            options.excludeCredentials = options.excludeCredentials.map((credential) => ({
+                ...credential,
+                id: base64urlToBuffer(credential.id),
+            }));
+        }
+        return options;
+    }
+
+    function credentialToJson(credential) {
+        const response = credential.response;
+        const jsonCredential = {
+            id: credential.id,
+            rawId: bufferToBase64url(credential.rawId),
+            type: credential.type,
+            response: {
+                attestationObject: bufferToBase64url(response.attestationObject),
+                clientDataJSON: bufferToBase64url(response.clientDataJSON),
+            },
+            clientExtensionResults: credential.getClientExtensionResults(),
+        };
+        if (response.getTransports) {
+            jsonCredential.response.transports = response.getTransports();
+        }
+        if (credential.authenticatorAttachment) {
+            jsonCredential.authenticatorAttachment = credential.authenticatorAttachment;
+        }
+        return jsonCredential;
+    }
+
+    async function fetchJson(url, body) {
+        const response = await window.fetch(url, {
+            method: "POST",
+            headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-CSRFToken": form.querySelector("[name=csrfmiddlewaretoken]").value,
+            },
+            body: body ? JSON.stringify(body) : "{}",
+        });
+        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(data.error || "Passkey setup failed. Try again.");
+        }
+        return data;
+    }
+
+    async function registerPasskey() {
+        setError("");
+        button.disabled = true;
+        setStatus("Starting passkey setup.");
+        try {
+            const options = await fetchJson("{% url 'passkey_registration_options' %}");
+            setStatus("Use your device prompt to create the passkey.");
+            const credential = await navigator.credentials.create({
+                publicKey: prepareCreationOptions(options),
+            });
+            if (!credential) {
+                throw new Error("Passkey setup was cancelled.");
+            }
+            setStatus("Saving passkey.");
+            const result = await fetchJson("{% url 'passkey_registration_complete' %}", {
+                credential: credentialToJson(credential),
+                name: nameInput.value,
+            });
+            setStatus("Passkey added. Returning to Account safety.");
+            window.location.href = result.redirect_url;
+        } catch (error) {
+            setStatus("Passkey was not added.");
+            setError(error.message || "Passkey setup failed. Try again.");
+            button.disabled = false;
+        }
+    }
+
+    if (!window.PublicKeyCredential || !navigator.credentials || !navigator.credentials.create) {
+        button.disabled = true;
+        setStatus("This browser does not support passkey setup. Use backup keys or a connected account instead.");
+        return;
+    }
+
+    button.addEventListener("click", registerPasskey);
+})();
+</script>
+{% endblock %}

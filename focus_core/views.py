@@ -1,3 +1,4 @@
+import json
 import secrets
 
 from django import forms
@@ -8,19 +9,31 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
+from webauthn import generate_registration_options, options_to_json, verify_registration_response
+from webauthn.helpers import base64url_to_bytes, bytes_to_base64url
+from webauthn.helpers.structs import (
+    AttestationConveyancePreference,
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 
-from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 RECOVERY_CODE_COUNT = 8
+PASSKEY_REGISTRATION_CHALLENGE_SESSION_KEY = "passkey_registration_challenge"
+PASSKEY_REGISTRATION_RP_ID_SESSION_KEY = "passkey_registration_rp_id"
+PASSKEY_REGISTRATION_ORIGIN_SESSION_KEY = "passkey_registration_origin"
 
 
 def unique_group_slug(name):
@@ -48,6 +61,18 @@ def generate_recovery_code():
 def development_subject_id(provider, handle):
     normalized_handle = slugify(handle) or "account"
     return f"dev-{provider.lower()}-{normalized_handle}"
+
+
+def request_rp_id(request):
+    return request.get_host().split(":")[0]
+
+
+def request_origin(request):
+    return request.build_absolute_uri("/").rstrip("/")
+
+
+def credential_id_bytes(credential):
+    return base64url_to_bytes(credential.credential_id)
 
 
 def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
@@ -245,6 +270,90 @@ class LinkedAccountRemoveView(LoginRequiredMixin, View):
         identity.delete()
         messages.success(request, f"Removed {account_name}.")
         return redirect("account_safety")
+
+
+class PasskeyRegistrationView(LoginRequiredMixin, FormView):
+    form_class = PasskeyRegistrationForm
+    template_name = "focus_core/passkey_register.html"
+
+    def post(self, request, *args, **kwargs):
+        messages.error(request, "Use the Add passkey button to start passkey setup.")
+        return redirect("passkey_register")
+
+
+class PasskeyRegistrationOptionsView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        excluded_credentials = [
+            PublicKeyCredentialDescriptor(id=credential_id_bytes(credential))
+            for credential in request.user.webauthn_credentials.all()
+        ]
+        rp_id = request_rp_id(request)
+        origin = request_origin(request)
+        options = generate_registration_options(
+            rp_id=rp_id,
+            rp_name="FOCUS",
+            user_id=str(request.user.pk).encode("utf-8"),
+            user_name=f"focus-user-{request.user.pk}",
+            user_display_name=request.user.public_name,
+            exclude_credentials=excluded_credentials,
+            authenticator_selection=AuthenticatorSelectionCriteria(
+                resident_key=ResidentKeyRequirement.REQUIRED,
+                user_verification=UserVerificationRequirement.REQUIRED,
+            ),
+            attestation=AttestationConveyancePreference.NONE,
+        )
+
+        request.session[PASSKEY_REGISTRATION_CHALLENGE_SESSION_KEY] = bytes_to_base64url(options.challenge)
+        request.session[PASSKEY_REGISTRATION_RP_ID_SESSION_KEY] = rp_id
+        request.session[PASSKEY_REGISTRATION_ORIGIN_SESSION_KEY] = origin
+        return JsonResponse(json.loads(options_to_json(options)))
+
+
+class PasskeyRegistrationCompleteView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        challenge = request.session.pop(PASSKEY_REGISTRATION_CHALLENGE_SESSION_KEY, None)
+        rp_id = request.session.pop(PASSKEY_REGISTRATION_RP_ID_SESSION_KEY, None)
+        origin = request.session.pop(PASSKEY_REGISTRATION_ORIGIN_SESSION_KEY, None)
+        if not challenge or not rp_id or not origin:
+            return JsonResponse(
+                {"ok": False, "error": "Start passkey setup again."},
+                status=400,
+            )
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JsonResponse({"ok": False, "error": "Passkey setup did not send a valid response."}, status=400)
+
+        credential = payload.get("credential")
+        passkey_name = (payload.get("name") or "").strip()
+        if not credential:
+            return JsonResponse({"ok": False, "error": "Passkey setup did not return a credential."}, status=400)
+
+        try:
+            verification = verify_registration_response(
+                credential=credential,
+                expected_challenge=base64url_to_bytes(challenge),
+                expected_rp_id=rp_id,
+                expected_origin=origin,
+                require_user_verification=True,
+            )
+        except Exception:
+            return JsonResponse({"ok": False, "error": "Passkey setup could not be verified. Try again."}, status=400)
+
+        credential_id = bytes_to_base64url(verification.credential_id)
+        if WebAuthnCredential.objects.filter(credential_id=credential_id).exists():
+            return JsonResponse({"ok": False, "error": "That passkey is already connected."}, status=400)
+
+        WebAuthnCredential.objects.create(
+            user=request.user,
+            credential_id=credential_id,
+            public_key=bytes_to_base64url(verification.credential_public_key),
+            name=passkey_name[:150],
+            sign_count=verification.sign_count,
+        )
+        messages.success(request, "Passkey added.")
+        return JsonResponse({"ok": True, "redirect_url": reverse("account_safety")})
 
 
 class PasskeyUpdateView(LoginRequiredMixin, UpdateView):

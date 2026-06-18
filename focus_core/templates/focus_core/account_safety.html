@@ -1,0 +1,49 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Account safety{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li>Account safety</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <p class="eyebrow">Account</p>
+    <h1>Account safety</h1>
+    <p>Backup keys can help you get back in if your connected account or device stops working.</p>
+
+    {% if generated_codes %}
+        <section class="section-block" aria-labelledby="new-backup-keys-heading">
+            <h2 id="new-backup-keys-heading">Save these backup keys now</h2>
+            <p>Each backup key works one time. They will not be shown again after you leave this page.</p>
+            <ol class="recovery-code-list">
+                {% for code in generated_codes %}
+                    <li><code>{{ code }}</code></li>
+                {% endfor %}
+            </ol>
+        </section>
+    {% endif %}
+
+    <section class="section-block" aria-labelledby="backup-keys-heading">
+        <h2 id="backup-keys-heading">Backup keys</h2>
+        <p>You have {{ unused_recovery_code_count }} unused backup key{{ unused_recovery_code_count|pluralize }}.</p>
+        <p>Creating new backup keys replaces any old ones. Save them somewhere private, such as a password manager or another place only you can access.</p>
+        <form method="post" class="form-stack">
+            {% csrf_token %}
+            <button type="submit" class="button">Create new backup keys</button>
+        </form>
+    </section>
+
+    <section class="section-block" aria-labelledby="other-options-heading">
+        <h2 id="other-options-heading">Other ways to avoid getting locked out</h2>
+        <ul>
+            <li>Connect more than one sign-in method when that option is available.</li>
+            <li>Use a device unlock sign-in when passkeys are available.</li>
+            <li>Keep at least one group owner active so production groups can continue if someone loses access.</li>
+        </ul>
+    </section>
+</div>
+{% endblock %}

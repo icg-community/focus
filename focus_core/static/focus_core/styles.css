@@ -421,6 +421,23 @@ textarea.field-control {
     gap: 1rem;
 }
 
+.recovery-code-list {
+    display: grid;
+    gap: 0.5rem;
+    margin: 1rem 0;
+    padding-left: 1.75rem;
+}
+
+.recovery-code-list code {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.35rem 0.5rem;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 1.05rem;
+}
+
 @media (max-width: 42rem) {
     .page-heading {
         display: block;

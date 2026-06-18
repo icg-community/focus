@@ -1,9 +1,12 @@
-from django.conf import settings
+import secrets
+
 from django import forms
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
@@ -13,7 +16,11 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
 from .forms import DisplayNameForm, GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, VideoProject
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject
+
+
+RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+RECOVERY_CODE_COUNT = 8
 
 
 def unique_group_slug(name):
@@ -28,6 +35,14 @@ def unique_group_slug(name):
 
 def user_group_membership(user, group):
     return Membership.objects.filter(user=user, group=group).first()
+
+
+def generate_recovery_code():
+    parts = [
+        "".join(secrets.choice(RECOVERY_CODE_ALPHABET) for _ in range(4))
+        for _ in range(4)
+    ]
+    return "-".join(parts)
 
 
 class DevSignInView(FormView):
@@ -101,6 +116,27 @@ class ProfileView(LoginRequiredMixin, UpdateView):
 
     def get_success_url(self):
         return reverse("profile")
+
+
+class AccountSafetyView(LoginRequiredMixin, TemplateView):
+    template_name = "focus_core/account_safety.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["unused_recovery_code_count"] = self.request.user.recovery_codes.filter(used_at__isnull=True).count()
+        return context
+
+    def post(self, request, *args, **kwargs):
+        codes = [generate_recovery_code() for _ in range(RECOVERY_CODE_COUNT)]
+        with transaction.atomic():
+            request.user.recovery_codes.all().delete()
+            for code in codes:
+                RecoveryCode.create_for_code(request.user, code)
+
+        context = self.get_context_data(generated_codes=codes)
+        context["unused_recovery_code_count"] = len(codes)
+        messages.success(request, "New backup keys created. Save them now, because they will not be shown again.")
+        return self.render_to_response(context)
 
 
 class GroupCreateView(LoginRequiredMixin, CreateView):

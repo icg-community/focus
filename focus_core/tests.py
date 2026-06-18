@@ -266,6 +266,59 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, 'aria-invalid="true"')
         self.assertContains(response, 'id="bio-error"')
 
+    def test_account_safety_requires_sign_in(self):
+        response = self.client.get(reverse("account_safety"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dev_sign_in"), response["Location"])
+
+    def test_account_safety_shows_unused_backup_key_count(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        RecoveryCode.create_for_code(user, "first-code")
+        used_code = RecoveryCode.create_for_code(user, "used-code")
+        used_code.mark_used()
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("account_safety"))
+
+        self.assertContains(response, "Account safety")
+        self.assertContains(response, "Backup keys")
+        self.assertContains(response, "You have 1 unused backup key.")
+        self.assertContains(response, "Create new backup keys")
+
+    def test_account_safety_generates_hashed_backup_keys_shown_once(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("account_safety"))
+
+        codes = response.context["generated_codes"]
+        stored_codes = list(user.recovery_codes.all())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(codes), 8)
+        self.assertEqual(len(stored_codes), 8)
+        self.assertContains(response, "Save these backup keys now")
+        self.assertContains(response, "You have 8 unused backup keys.")
+        for code in codes:
+            self.assertContains(response, code)
+            self.assertTrue(any(stored_code.matches(code) for stored_code in stored_codes))
+            self.assertFalse(RecoveryCode.objects.filter(code_hash=code).exists())
+
+        follow_up_response = self.client.get(reverse("account_safety"))
+        self.assertContains(follow_up_response, "You have 8 unused backup keys.")
+        self.assertNotContains(follow_up_response, codes[0])
+
+    def test_account_safety_replaces_existing_backup_keys(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        old_code = RecoveryCode.create_for_code(user, "old-backup-key")
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("account_safety"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(RecoveryCode.objects.filter(pk=old_code.pk).exists())
+        self.assertEqual(user.recovery_codes.filter(used_at__isnull=True).count(), 8)
+
     def test_group_detail_rejects_non_member(self):
         user = FocusUser.objects.create(display_name="Member")
         group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")

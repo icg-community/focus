@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject
 
 
 class FocusUserTests(TestCase):
@@ -178,6 +178,121 @@ class ProductionFlowTests(TestCase):
         self.assertRedirects(edit_response, reverse("group_detail", kwargs={"slug": group.slug}))
         self.assertEqual(project.status, "EDITING")
 
+    def test_project_assignments_can_be_created_and_updated(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        second_writer = FocusUser.objects.create(display_name="Second Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=second_writer, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(producer)
+
+        self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "Launch Video",
+                "description": "",
+                "status": "SCRIPTING",
+                "asset_pipeline_url": "",
+                "script_url": "",
+                "assigned_editors": [str(editor.pk)],
+                "assigned_writers": [str(writer.pk)],
+            },
+        )
+
+        project = group.projects.get(title="Launch Video")
+        self.assertQuerySetEqual(project.assigned_editors.all(), [editor])
+        self.assertQuerySetEqual(project.assigned_writers.all(), [writer])
+
+        self.client.post(
+            reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "title": "Launch Video",
+                "description": "",
+                "status": "EDITING",
+                "asset_pipeline_url": "",
+                "script_url": "",
+                "assigned_editors": [],
+                "assigned_writers": [str(second_writer.pk)],
+            },
+        )
+
+        project.refresh_from_db()
+        self.assertQuerySetEqual(project.assigned_editors.all(), [])
+        self.assertQuerySetEqual(project.assigned_writers.all(), [second_writer])
+
+    def test_project_assignment_form_uses_group_member_checkbox_groups(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("project_create", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, '<fieldset class="field-group checkbox-group"', html=False)
+        self.assertContains(response, "Assigned editors")
+        self.assertContains(response, "Assigned writers")
+        self.assertContains(response, editor.public_name)
+        self.assertNotContains(response, outsider.public_name)
+
+    def test_project_detail_is_visible_to_group_member(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            description="Opening episode",
+            status=VideoProject.Status.REVIEW,
+            asset_pipeline_url="https://example.com/assets",
+            script_url="https://example.com/script",
+        )
+        project.assigned_editors.add(editor)
+        project.assigned_writers.add(writer)
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(response, "Launch Video")
+        self.assertContains(response, "In Internal Review")
+        self.assertContains(response, "Open asset folder for Launch Video")
+        self.assertContains(response, "Open script for Launch Video")
+        self.assertContains(response, editor.public_name)
+        self.assertContains(response, writer.public_name)
+
+    def test_project_detail_rejects_non_member(self):
+        member = FocusUser.objects.create(display_name="Member")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=member, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_group_detail_links_project_title_to_detail_page(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
     def test_project_form_errors_are_exposed_to_assistive_technology(self):
         user = FocusUser.objects.create(display_name="Producer")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
@@ -321,3 +436,136 @@ class InvitationFlowTests(TestCase):
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-invalid="true"')
         self.assertContains(response, 'id="role_to_assign-error"')
+
+
+class MemberManagementFlowTests(TestCase):
+    def test_group_member_can_view_roster(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(member)
+
+        response = self.client.get(reverse("group_members", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Members of Studio")
+        self.assertContains(response, "Owner")
+        self.assertContains(response, "Editor")
+        self.assertNotContains(response, "Save role for Owner")
+
+    def test_non_member_cannot_view_roster(self):
+        user = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("group_members", kwargs={"slug": group.slug}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_owner_can_update_member_role(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        membership = Membership.objects.create(user=member, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("membership_role_update", kwargs={"slug": group.slug, "pk": membership.pk}),
+            {f"membership-{membership.pk}-role": Membership.Role.EDITOR.value},
+        )
+
+        membership.refresh_from_db()
+        self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
+        self.assertEqual(membership.role, Membership.Role.EDITOR)
+
+    def test_non_owner_cannot_update_member_role(self):
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        membership = Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(editor)
+
+        response = self.client.post(
+            reverse("membership_role_update", kwargs={"slug": group.slug, "pk": membership.pk}),
+            {f"membership-{membership.pk}-role": Membership.Role.TALENT.value},
+        )
+
+        membership.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(membership.role, Membership.Role.WRITER)
+
+    def test_owner_can_remove_member(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("membership_remove", kwargs={"slug": group.slug, "pk": membership.pk}))
+
+        self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
+        self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
+
+    def test_non_owner_cannot_remove_member(self):
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        membership = Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(editor)
+
+        response = self.client.post(reverse("membership_remove", kwargs={"slug": group.slug, "pk": membership.pk}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Membership.objects.filter(pk=membership.pk).exists())
+
+    def test_last_owner_cannot_be_demoted_through_web_ui(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        membership = Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("membership_role_update", kwargs={"slug": group.slug, "pk": membership.pk}),
+            {f"membership-{membership.pk}-role": Membership.Role.ADMIN.value},
+            follow=True,
+        )
+
+        membership.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A production group must keep at least one owner.")
+        self.assertEqual(membership.role, Membership.Role.OWNER)
+
+    def test_last_owner_cannot_be_removed_through_web_ui(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        membership = Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("membership_remove", kwargs={"slug": group.slug, "pk": membership.pk}),
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "A production group must keep at least one owner.")
+        self.assertTrue(Membership.objects.filter(pk=membership.pk).exists())
+
+    def test_owner_forms_have_unique_accessible_descriptions(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        owner_membership = Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("group_members", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, f'id="membership-{owner_membership.pk}-role-help"')
+        self.assertContains(response, f'id="membership-{member_membership.pk}-role-help"')
+        self.assertContains(response, f'aria-describedby="membership-{owner_membership.pk}-role-help"')
+        self.assertContains(response, f'aria-describedby="membership-{member_membership.pk}-role-help"')

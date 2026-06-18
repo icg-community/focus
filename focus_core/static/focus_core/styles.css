@@ -11,6 +11,7 @@
     --focus-outer: #ffffff;
     --danger-bg: #fff0f0;
     --danger-border: #b00020;
+    --danger-text: #7a0015;
 }
 
 * {
@@ -183,6 +184,18 @@ h3 {
     color: var(--accent-dark);
 }
 
+.button--danger {
+    background: var(--danger-border);
+    border-color: var(--danger-border);
+    color: #ffffff;
+}
+
+.button--danger:hover {
+    background: var(--danger-text);
+    border-color: var(--danger-text);
+    color: #ffffff;
+}
+
 .item-list {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
@@ -254,6 +267,37 @@ thead th {
     gap: 0.35rem;
 }
 
+.checkbox-group {
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.checkbox-group legend {
+    font-weight: 700;
+    padding: 0;
+}
+
+.checkbox-group div {
+    display: grid;
+    gap: 0.5rem;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-weight: 400;
+}
+
+.checkbox-input {
+    margin-top: 0.3rem;
+}
+
+.compact-field {
+    max-width: 18rem;
+}
+
 label {
     font-weight: 700;
 }
@@ -295,6 +339,42 @@ textarea.field-control {
     padding: 0.75rem;
 }
 
+.inline-form {
+    margin: 0;
+}
+
+.table-actions {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.detail-list {
+    display: grid;
+    gap: 1rem;
+    margin: 0;
+}
+
+.detail-list div {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.detail-list dt {
+    font-weight: 700;
+}
+
+.detail-list dd {
+    margin: 0.25rem 0 0;
+}
+
+.assignment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
+    gap: 1rem;
+}
+
 @media (max-width: 42rem) {
     .page-heading {
         display: block;
@@ -320,6 +400,7 @@ textarea.field-control {
 @media (forced-colors: active) {
     .button,
     .field-control,
+    .detail-list div,
     .item-card,
     .empty-state,
     .error-summary {

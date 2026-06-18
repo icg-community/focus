@@ -17,6 +17,7 @@
     </div>
     <div class="action-row">
         <a class="button" href="{% url 'project_create' object.slug %}">Create project</a>
+        <a class="button button--secondary" href="{% url 'group_members' object.slug %}">View members</a>
         {% if membership.role == "OWNER" %}
             <a class="button button--secondary" href="{% url 'group_invitations' object.slug %}">Manage invitations</a>
         {% endif %}
@@ -40,7 +41,9 @@
                 <tbody>
                     {% for project in projects %}
                         <tr>
-                            <th scope="row">{{ project.title }}</th>
+                            <th scope="row">
+                                <a href="{% url 'project_detail' object.slug project.pk %}">{{ project.title }}</a>
+                            </th>
                             <td>{{ project.get_status_display }}</td>
                             <td>{{ project.updated_at|date:"M j, Y" }}</td>
                             <td><a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a></td>

@@ -11,7 +11,19 @@ urlpatterns = [
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),
     path("groups/<slug:slug>/", views.GroupDetailView.as_view(), name="group_detail"),
     path("groups/<slug:slug>/invitations/", views.GroupInvitationView.as_view(), name="group_invitations"),
+    path("groups/<slug:slug>/members/", views.GroupMembersView.as_view(), name="group_members"),
+    path(
+        "groups/<slug:slug>/members/<int:pk>/role/",
+        views.MembershipRoleUpdateView.as_view(),
+        name="membership_role_update",
+    ),
+    path(
+        "groups/<slug:slug>/members/<int:pk>/remove/",
+        views.MembershipRemoveView.as_view(),
+        name="membership_remove",
+    ),
     path("groups/<slug:slug>/projects/new/", views.ProjectCreateView.as_view(), name="project_create"),
+    path("groups/<slug:group_slug>/projects/<int:pk>/", views.ProjectDetailView.as_view(), name="project_detail"),
     path("groups/<slug:group_slug>/projects/<int:pk>/edit/", views.ProjectUpdateView.as_view(), name="project_update"),
     path("invites/<uuid:token>/", views.InvitationAcceptView.as_view(), name="invite_accept"),
 ]

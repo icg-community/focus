@@ -3,14 +3,15 @@ from django import forms
 from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.text import slugify
+from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
 
-from .forms import GroupInvitationForm, ProductionGroupForm, VideoProjectForm
+from .forms import GroupInvitationForm, MembershipRoleForm, ProductionGroupForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, VideoProject
 
 
@@ -130,6 +131,77 @@ class GroupInvitationView(LoginRequiredMixin, FormView):
         return context
 
 
+class GroupMembersView(LoginRequiredMixin, TemplateView):
+    template_name = "focus_core/group_members.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        self.membership = user_group_membership(request.user, self.group)
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        members = self.group.members.select_related("user").order_by("joined_at")
+        can_manage_members = self.membership.role == Membership.Role.OWNER
+        context["group"] = self.group
+        context["membership"] = self.membership
+        context["can_manage_members"] = can_manage_members
+        context["member_rows"] = [
+            {
+                "membership": membership,
+                "form": MembershipRoleForm(
+                    instance=membership,
+                    prefix=f"membership-{membership.pk}",
+                ),
+            }
+            for membership in members
+        ]
+        return context
+
+
+class MembershipRoleUpdateView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        current_membership = user_group_membership(request.user, group)
+        if current_membership.role != Membership.Role.OWNER:
+            raise PermissionDenied("Only group owners can update member roles.")
+
+        membership = get_object_or_404(Membership, pk=kwargs["pk"], group=group)
+        form = MembershipRoleForm(
+            request.POST,
+            instance=membership,
+            prefix=f"membership-{membership.pk}",
+        )
+        if form.is_valid():
+            updated_membership = form.save()
+            messages.success(request, f"Updated {updated_membership.user.public_name}'s role.")
+        else:
+            messages.error(request, " ".join(error for errors in form.errors.values() for error in errors))
+
+        return redirect("group_members", slug=group.slug)
+
+
+class MembershipRemoveView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        current_membership = user_group_membership(request.user, group)
+        if current_membership.role != Membership.Role.OWNER:
+            raise PermissionDenied("Only group owners can remove members.")
+
+        membership = get_object_or_404(Membership, pk=kwargs["pk"], group=group)
+        removed_user = membership.user
+        try:
+            membership.delete()
+        except ValidationError as error:
+            messages.error(request, " ".join(error.messages))
+            return redirect("group_members", slug=group.slug)
+
+        messages.success(request, f"Removed {removed_user.public_name} from {group.name}.")
+        if removed_user == request.user:
+            return redirect("dashboard")
+        return redirect("group_members", slug=group.slug)
+
+
 class InvitationAcceptView(LoginRequiredMixin, TemplateView):
     template_name = "focus_core/invite_accept.html"
 
@@ -179,6 +251,11 @@ class ProjectCreateView(LoginRequiredMixin, CreateView):
         form.instance.group = self.group
         return super().form_valid(form)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["group"] = self.group
+        return kwargs
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["group"] = self.group
@@ -188,6 +265,26 @@ class ProjectCreateView(LoginRequiredMixin, CreateView):
         return reverse("group_detail", kwargs={"slug": self.group.slug})
 
 
+class ProjectDetailView(LoginRequiredMixin, DetailView):
+    model = VideoProject
+    template_name = "focus_core/project_detail.html"
+
+    def get_queryset(self):
+        return (
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            )
+            .select_related("group")
+            .prefetch_related("assigned_editors", "assigned_writers")
+        )
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["group"] = self.object.group
+        return context
+
+
 class ProjectUpdateView(LoginRequiredMixin, UpdateView):
     model = VideoProject
     form_class = VideoProjectForm
@@ -195,6 +292,11 @@ class ProjectUpdateView(LoginRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return VideoProject.objects.filter(group__slug=self.kwargs["group_slug"], group__members__user=self.request.user)
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["group"] = self.object.group
+        return kwargs
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

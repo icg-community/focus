@@ -18,7 +18,11 @@
         {% csrf_token %}
         <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
         {% for field in form %}
-            {% include "focus_core/includes/field.html" with field=field %}
+            {% if field.name == "assigned_editors" or field.name == "assigned_writers" %}
+                {% include "focus_core/includes/checkbox_group.html" with field=field %}
+            {% else %}
+                {% include "focus_core/includes/field.html" with field=field %}
+            {% endif %}
         {% endfor %}
         <button type="submit" class="button">{% if object %}Save project{% else %}Create project{% endif %}</button>
     </form>

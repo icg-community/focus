@@ -1,0 +1,67 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Members of {{ group.name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></li>
+        <li>Members</li>
+    </ol>
+</nav>
+
+<div class="page-heading">
+    <div>
+        <p class="eyebrow">Production group</p>
+        <h1>Members of {{ group.name }}</h1>
+    </div>
+    {% if can_manage_members %}
+        <a class="button button--secondary" href="{% url 'group_invitations' group.slug %}">Manage invitations</a>
+    {% endif %}
+</div>
+
+<div class="table-wrap">
+    <table>
+        <caption>Members and roles for {{ group.name }}</caption>
+        <thead>
+            <tr>
+                <th scope="col">Member</th>
+                <th scope="col">Current role</th>
+                <th scope="col">Joined</th>
+                {% if can_manage_members %}
+                    <th scope="col">Actions</th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in member_rows %}
+                <tr>
+                    <th scope="row">{{ row.membership.user.public_name }}</th>
+                    <td>{{ row.membership.get_role_display }}</td>
+                    <td>{{ row.membership.joined_at|date:"M j, Y" }}</td>
+                    {% if can_manage_members %}
+                        <td>
+                            <div class="table-actions">
+                                <form method="post" action="{% url 'membership_role_update' group.slug row.membership.pk %}" class="inline-form">
+                                    {% csrf_token %}
+                                    <div class="field-group compact-field">
+                                        <label for="{{ row.form.role.id_for_label }}">Role for {{ row.membership.user.public_name }}</label>
+                                        {{ row.form.role }}
+                                        <p id="{{ row.form.role.html_name }}-help" class="field-help">Choose this member's role in the production group.</p>
+                                    </div>
+                                    <button type="submit" class="button">Save role for {{ row.membership.user.public_name }}</button>
+                                </form>
+                                <form method="post" action="{% url 'membership_remove' group.slug row.membership.pk %}" class="inline-form">
+                                    {% csrf_token %}
+                                    <button type="submit" class="button button--danger">Remove {{ row.membership.user.public_name }}</button>
+                                </form>
+                            </div>
+                        </td>
+                    {% endif %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

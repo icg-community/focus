@@ -229,6 +229,45 @@ h3 {
     color: var(--muted);
 }
 
+.filter-nav {
+    margin-bottom: 1rem;
+}
+
+.filter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.filter-link {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    border: 2px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.45rem 0.75rem;
+    background: var(--surface);
+    color: var(--accent);
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.filter-link:hover {
+    border-color: var(--accent-dark);
+    color: var(--accent-dark);
+    text-decoration: underline;
+}
+
+.filter-link[aria-current="page"] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: #ffffff;
+    text-decoration: underline;
+}
+
 .table-wrap {
     overflow-x: auto;
 }
@@ -401,6 +440,7 @@ textarea.field-control {
     .button,
     .field-control,
     .detail-list div,
+    .filter-link,
     .item-card,
     .empty-state,
     .error-summary {

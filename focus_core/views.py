@@ -115,7 +115,37 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["projects"] = self.object.projects.order_by("-updated_at", "title")
+        all_projects = self.object.projects.all()
+        selected_status = self.request.GET.get("status", "")
+        valid_statuses = {value for value, _label in VideoProject.Status.choices}
+        if selected_status not in valid_statuses:
+            selected_status = ""
+
+        projects = all_projects
+        if selected_status:
+            projects = projects.filter(status=selected_status)
+
+        detail_url = reverse("group_detail", kwargs={"slug": self.object.slug})
+        context["projects"] = projects.order_by("-updated_at", "title")
+        context["project_total_count"] = all_projects.count()
+        context["selected_status"] = selected_status
+        context["status_filters"] = [
+            {
+                "label": "All projects",
+                "count": all_projects.count(),
+                "url": detail_url,
+                "is_current": selected_status == "",
+            },
+            *[
+                {
+                    "label": label,
+                    "count": all_projects.filter(status=value).count(),
+                    "url": f"{detail_url}?status={value}",
+                    "is_current": selected_status == value,
+                }
+                for value, label in VideoProject.Status.choices
+            ],
+        ]
         context["membership"] = user_group_membership(self.request.user, self.object)
         return context
 

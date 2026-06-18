@@ -177,6 +177,63 @@ class ProductionFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_group_detail_filters_projects_by_status(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        scripting_project = VideoProject.objects.create(
+            group=group,
+            title="Script Draft",
+            status=VideoProject.Status.SCRIPTING,
+        )
+        VideoProject.objects.create(
+            group=group,
+            title="Edit Pass",
+            status=VideoProject.Status.EDITING,
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("group_detail", kwargs={"slug": group.slug}),
+            {"status": VideoProject.Status.SCRIPTING},
+        )
+
+        self.assertContains(response, "Script Draft")
+        self.assertNotContains(response, "Edit Pass")
+        self.assertContains(response, 'aria-current="page"')
+        self.assertContains(response, f"?status={VideoProject.Status.SCRIPTING}")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": scripting_project.pk}))
+
+    def test_group_detail_ignores_invalid_status_filter(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        VideoProject.objects.create(group=group, title="Script Draft", status=VideoProject.Status.SCRIPTING)
+        VideoProject.objects.create(group=group, title="Edit Pass", status=VideoProject.Status.EDITING)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}), {"status": "UNKNOWN"})
+
+        self.assertContains(response, "Script Draft")
+        self.assertContains(response, "Edit Pass")
+        self.assertContains(response, "All projects (2)")
+
+    def test_group_detail_explains_empty_status_filter(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        VideoProject.objects.create(group=group, title="Script Draft", status=VideoProject.Status.SCRIPTING)
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("group_detail", kwargs={"slug": group.slug}),
+            {"status": VideoProject.Status.READY},
+        )
+
+        self.assertContains(response, "No projects match this status")
+        self.assertContains(response, "Show all projects")
+        self.assertNotContains(response, "Script Draft")
+
     def test_project_create_and_edit_within_member_group(self):
         user = FocusUser.objects.create(display_name="Producer")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")

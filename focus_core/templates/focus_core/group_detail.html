@@ -26,6 +26,20 @@
 
 <section>
     <h2>Projects</h2>
+    {% if project_total_count %}
+        <nav class="filter-nav" aria-label="Project status filters">
+            <ul class="filter-list">
+                {% for filter in status_filters %}
+                    <li>
+                        <a class="filter-link" href="{{ filter.url }}"{% if filter.is_current %} aria-current="page"{% endif %}>
+                            {{ filter.label }} ({{ filter.count }})
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endif %}
+
     {% if projects %}
         <div class="table-wrap">
             <table>
@@ -51,6 +65,12 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+    {% elif project_total_count %}
+        <div class="empty-state">
+            <h3>No projects match this status</h3>
+            <p>Choose another status filter or return to the full project list.</p>
+            <a class="button" href="{% url 'group_detail' object.slug %}">Show all projects</a>
         </div>
     {% else %}
         <div class="empty-state">

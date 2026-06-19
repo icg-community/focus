@@ -611,6 +611,27 @@ class GroupInvitationView(LoginRequiredMixin, FormView):
         return context
 
 
+class GroupInvitationRevokeView(LoginRequiredMixin, View):
+    def dispatch(self, request, *args, **kwargs):
+        self.group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        self.membership = user_group_membership(request.user, self.group)
+        if self.membership.role != Membership.Role.OWNER:
+            raise PermissionDenied("Only group owners can revoke invite links.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        invitation = get_object_or_404(GroupInvitation, pk=kwargs["pk"], group=self.group)
+        if invitation.is_used:
+            messages.error(request, "Used invite links cannot be revoked.")
+        elif invitation.revoked_at:
+            messages.info(request, "That invite link is already revoked.")
+        else:
+            invitation.revoked_at = timezone.now()
+            invitation.save(update_fields=["revoked_at"])
+            messages.success(request, "Invite link revoked.")
+        return redirect("group_invitations", slug=self.group.slug)
+
+
 class GroupMembersView(LoginRequiredMixin, TemplateView):
     template_name = "focus_core/group_members.html"
 
@@ -745,7 +766,7 @@ class InvitationAcceptView(TemplateView):
             messages.info(request, "You already belong to this production group.")
             return redirect("group_detail", slug=self.invitation.group.slug)
 
-        if self.invitation.is_used:
+        if self.invitation.is_used or self.invitation.revoked_at:
             return self.get(request, *args, **kwargs)
 
         Membership.objects.create(
@@ -761,6 +782,7 @@ class InvitationAcceptView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["invitation"] = self.invitation
+        context["is_revoked"] = self.invitation.revoked_at is not None
         context["already_member"] = (
             self.request.user.is_authenticated
             and user_group_membership(self.request.user, self.invitation.group) is not None

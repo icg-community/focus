@@ -194,6 +194,7 @@ class GroupInvitation(models.Model):
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     role_to_assign = models.CharField(max_length=10, choices=Membership.Role.choices, default=Membership.Role.TALENT)
     is_used = models.BooleanField(default=False)
+    revoked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

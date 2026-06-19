@@ -32,6 +32,11 @@ urlpatterns = [
     path("groups/new/", views.GroupCreateView.as_view(), name="group_create"),
     path("groups/<slug:slug>/", views.GroupDetailView.as_view(), name="group_detail"),
     path("groups/<slug:slug>/invitations/", views.GroupInvitationView.as_view(), name="group_invitations"),
+    path(
+        "groups/<slug:slug>/invitations/<int:pk>/revoke/",
+        views.GroupInvitationRevokeView.as_view(),
+        name="group_invitation_revoke",
+    ),
     path("groups/<slug:slug>/members/", views.GroupMembersView.as_view(), name="group_members"),
     path("groups/<slug:slug>/members/<int:pk>/", views.MemberProfileView.as_view(), name="member_profile"),
     path(

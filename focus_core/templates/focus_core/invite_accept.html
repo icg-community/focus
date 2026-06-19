@@ -7,7 +7,12 @@
     <p class="eyebrow">Invitation</p>
     <h1>Join {{ invitation.group.name }}</h1>
 
-    {% if invitation.is_used and not already_member %}
+    {% if is_revoked and not already_member %}
+        <div class="empty-state">
+            <h2>This invite has been revoked</h2>
+            <p>Ask a group owner for a new invite link.</p>
+        </div>
+    {% elif invitation.is_used and not already_member %}
         <div class="empty-state">
             <h2>This invite has already been used</h2>
             <p>Ask a group owner for a new invite link.</p>

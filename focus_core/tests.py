@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
 from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
@@ -1473,6 +1474,70 @@ class InvitationFlowTests(TestCase):
         self.assertContains(response, "Invite links for Studio")
         self.assertContains(response, str(invitation.token))
         self.assertContains(response, "Create invite link")
+        self.assertContains(response, "Available")
+        self.assertContains(response, "Revoke invite for Script Writer")
+
+    def test_owner_can_revoke_unused_invite_link(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
+
+        invitation.refresh_from_db()
+        self.assertRedirects(response, reverse("group_invitations", kwargs={"slug": group.slug}))
+        self.assertIsNotNone(invitation.revoked_at)
+        self.assertFalse(invitation.is_used)
+
+    def test_non_owner_cannot_revoke_invite_link(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(member)
+
+        response = self.client.post(reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
+
+        invitation.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(invitation.revoked_at)
+
+    def test_used_invite_cannot_be_revoked(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(
+            group=group,
+            role_to_assign=Membership.Role.WRITER,
+            is_used=True,
+        )
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
+
+        invitation.refresh_from_db()
+        self.assertRedirects(response, reverse("group_invitations", kwargs={"slug": group.slug}))
+        self.assertIsNone(invitation.revoked_at)
+
+    def test_revoked_invite_status_hides_revoke_action(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(
+            group=group,
+            role_to_assign=Membership.Role.WRITER,
+            revoked_at=timezone.now(),
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("group_invitations", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Revoked")
+        self.assertNotContains(response, reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
 
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
     def test_signed_out_user_can_preview_unused_invite(self):
@@ -1568,6 +1633,26 @@ class InvitationFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "This invite has already been used")
+        self.assertFalse(Membership.objects.filter(user=new_member, group=group).exists())
+
+    def test_revoked_invite_cannot_be_accepted(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        new_member = FocusUser.objects.create(display_name="New Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(
+            group=group,
+            role_to_assign=Membership.Role.WRITER,
+            revoked_at=timezone.now(),
+        )
+        self.client.force_login(new_member)
+
+        response = self.client.post(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        invitation.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "This invite has been revoked")
+        self.assertFalse(invitation.is_used)
         self.assertFalse(Membership.objects.filter(user=new_member, group=group).exists())
 
     def test_existing_member_does_not_consume_invite(self):

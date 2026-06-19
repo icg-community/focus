@@ -32,7 +32,7 @@
 <section class="section-block">
     <h2>Invite links</h2>
     {% if invite_rows %}
-        <div class="table-wrap">
+        <div class="table-wrap" role="region" aria-label="Invite links table" tabindex="0">
             <table>
                 <caption>Invite links for {{ group.name }}</caption>
                 <thead>
@@ -41,15 +41,34 @@
                         <th scope="col">Status</th>
                         <th scope="col">Created</th>
                         <th scope="col">Link</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for row in invite_rows %}
                         <tr>
                             <th scope="row">{{ row.invitation.get_role_to_assign_display }}</th>
-                            <td>{% if row.invitation.is_used %}Used{% else %}Available{% endif %}</td>
+                            <td>
+                                {% if row.invitation.revoked_at %}
+                                    Revoked
+                                {% elif row.invitation.is_used %}
+                                    Used
+                                {% else %}
+                                    Available
+                                {% endif %}
+                            </td>
                             <td>{{ row.invitation.created_at|date:"M j, Y" }}</td>
                             <td><a href="{{ row.accept_url }}">Open invite for {{ row.invitation.get_role_to_assign_display }}</a></td>
+                            <td>
+                                {% if not row.invitation.is_used and not row.invitation.revoked_at %}
+                                    <form method="post" action="{% url 'group_invitation_revoke' group.slug row.invitation.pk %}" class="inline-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button button--danger">Revoke invite for {{ row.invitation.get_role_to_assign_display }}</button>
+                                    </form>
+                                {% else %}
+                                    No action available
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>

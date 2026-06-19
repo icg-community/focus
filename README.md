@@ -1,19 +1,207 @@
 # FOCUS
-Easy to use project management platform for content creators, with accessibility first design (screen reader and low-vision optimized) and support for essential task types like script writing, voice line submition and overall production progress, including keeping track of the editing stage. Accessible project management for production teams!
 
-## What is FOCUS?
+FOCUS is a privacy-first production management hub for content creation teams. It is being built for blind and sighted creators who need to manage scripts, voice lines, editing work, review stages, and team access without forcing people to disclose private identity details.
 
-FOCUS is a privacy-first production management hub for content creation teams.
+The project is in active development. The current app is a Django application with working local workflows, tests, and accessibility-focused templates. It is not production-ready yet.
 
-The initial foundation keeps identity separate from public profile data:
+## Goals
 
-* Provider IDs are stored as authentication anchors.
-* Public handles are used only as display fallback.
-* Users may add an optional display alias.
-* New accounts are created without passwords, no passwords can be breached.
-* Recovery codes are stored as hashes and become invalid after use.
-* Groups must keep at least one owner.
+- Keep public profile data separate from sign-in identity.
+- Support pseudonymous accounts with optional display names.
+- Help production groups manage projects, roles, invitations, assignments, and handoff notes.
+- Make account recovery approachable without relying on email addresses or passwords.
+- Keep the interface usable with keyboard navigation, screen readers, and low-vision workflows.
 
-This repository starts with the Django data model and tests so the privacy and
-account-continuity rules are explicit before user-facing workflows are added.
+## Implemented Functionality
 
+### Account and Sign-In
+
+- Pseudonymous user model with no required email address, legal name, or password.
+- Development-only sign-in flow for local work.
+- Passkey registration and passkey sign-in.
+- One-time backup keys for account recovery.
+- Backup key sign-in.
+- Account safety page for backup keys, linked accounts, and passkeys.
+- Connected account management for development identities.
+- Guardrails that prevent users from removing their last remaining access method.
+- Safe `next` redirects for sign-in flows.
+
+### Profiles
+
+- Optional display name.
+- Optional bio with guidance to avoid private personal details.
+- Availability status.
+- User-controlled setting to show or hide assigned projects on member profiles.
+- Member profile pages scoped to shared production groups.
+
+### Production Groups and Members
+
+- Create production groups.
+- Role-based group membership.
+- Group owner, admin / producer, editor, talent, and writer roles.
+- Member roster with role editing for group owners.
+- Owner-only member removal.
+- Self-service "leave group" action.
+- Protection against removing, demoting, or leaving as the last group owner.
+- Access checks so removed or departed members lose access to group content.
+
+### Invitations
+
+- Owner-only invite link creation.
+- Invite links assign a selected group role.
+- Invite acceptance after sign-in.
+- Used invite links cannot be reused.
+- Invite revocation.
+- Copy invite link button with accessible status messaging and fallback text.
+
+### Projects
+
+- Create and edit video projects inside a production group.
+- Track project title, description, status, script URL, asset pipeline URL, assigned editors, and assigned writers.
+- Status filters on group project lists.
+- Assigned project list on the signed-in user's dashboard.
+- Assigned projects can be shown on opted-in member profiles.
+
+### Project Notes
+
+- Add timestamped project notes.
+- Status changes automatically create notes.
+- Project detail pages show the note history newest first.
+- Group project lists, dashboard assignments, and member profile assignments show the latest note.
+- Latest-note links go directly to the project notes section.
+
+### Accessibility Work So Far
+
+- Semantic Django templates with headings, landmarks, table captions, and scoped table headers.
+- Skip link and keyboard-reachable native controls.
+- Form fields with labels, help text, `aria-describedby`, error summaries, and invalid state handling.
+- Live regions for passkey status, passkey errors, and invite-copy feedback.
+- Descriptive link and button text that names the affected project, member, invite, or group.
+- Plain-language messages for recovery, passkeys, invitations, and owner-protection rules.
+
+## Planned Functionality
+
+The following areas are not complete yet:
+
+- Production-ready authentication provider integrations beyond the local development provider.
+- More complete project lifecycle controls, such as archive, restore, or delete.
+- Notification or activity feed for project changes, notes, invites, and membership changes.
+- Richer project assets and script tracking.
+- More detailed permissions for admins, editors, writers, and talent.
+- Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
+- Automated accessibility checks in continuous integration.
+- Broader manual accessibility testing notes for NVDA, JAWS, Narrator, VoiceOver, keyboard-only use, zoom, and high contrast.
+- Contributor documentation for issue triage, pull requests, code review, and release workflow.
+
+## Technology
+
+- Python 3.12 or newer
+- Django 5
+- SQLite for local development
+- WebAuthn passkeys through the `webauthn` Python package
+
+## Local Development Setup
+
+These steps assume you are in the repository root.
+
+### 1. Create a virtual environment
+
+On Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
+
+On macOS or Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+```
+
+### 2. Install the project
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e .
+```
+
+### 3. Create the local database
+
+```bash
+python manage.py migrate
+```
+
+### 4. Run the development server
+
+```bash
+python manage.py runserver
+```
+
+Open the [local development server](http://127.0.0.1:8000/) in your browser.
+
+In local development, `DEBUG=True` enables the development sign-in page. Use it to create a local pseudonymous session without an email address or password.
+
+## Running Tests
+
+Run the full test suite:
+
+```bash
+python manage.py test
+```
+
+Run Django's project checks:
+
+```bash
+python manage.py check
+```
+
+Before sending changes, it is also useful to check for whitespace errors:
+
+```bash
+git diff --check
+```
+
+## Development Notes
+
+- Keep changes small and tied to a specific user-facing outcome.
+- Add or update tests for behavior changes.
+- Preserve privacy boundaries. Do not add email, legal name, phone number, or password requirements unless the product direction changes.
+- Use native HTML controls before custom controls.
+- Keep copy clear and direct, especially for sign-in, recovery, destructive actions, and permissions.
+- Do not remove the last account access method for a user.
+- Do not remove, demote, or allow leaving when that would leave a group without an owner.
+
+## Accessibility Expectations
+
+FOCUS is intended to follow WCAG 2.2 AA. When changing templates, forms, or frontend behavior:
+
+- Keep one clear page `h1`.
+- Use semantic landmarks and native controls.
+- Use descriptive link and button text.
+- Give data tables captions and scoped headers.
+- Associate form help and errors with the relevant field.
+- Avoid relying on color alone.
+- Make status changes available to assistive technology when content updates without a full page load.
+- Test keyboard access and focus order.
+
+## Project Structure
+
+```text
+focus_core/
+  models.py        Core data model for users, auth identities, groups, projects, notes, invites, and passkeys.
+  forms.py         Accessible Django forms and model forms.
+  views.py         Sign-in, account safety, groups, members, invites, projects, and notes views.
+  urls.py          Application routes.
+  tests.py         Django test suite.
+  templates/       Server-rendered Django templates.
+  static/          CSS and small client-side behavior.
+focus_project/
+  settings.py      Local Django settings.
+  urls.py          Project URL configuration.
+```
+
+## License
+
+This project is licensed under the terms in [LICENSE](LICENSE).

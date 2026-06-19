@@ -100,6 +100,10 @@ def url_with_next(request, view_name):
     return url
 
 
+def url_with_next_path(view_name, next_path):
+    return f"{reverse(view_name)}?{urlencode({'next': next_path})}"
+
+
 def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
     identities = user.identities.all()
     if excluding_identity:
@@ -720,7 +724,7 @@ class MembershipRemoveView(LoginRequiredMixin, View):
         return redirect("group_members", slug=group.slug)
 
 
-class InvitationAcceptView(LoginRequiredMixin, TemplateView):
+class InvitationAcceptView(TemplateView):
     template_name = "focus_core/invite_accept.html"
 
     def dispatch(self, request, *args, **kwargs):
@@ -731,6 +735,11 @@ class InvitationAcceptView(LoginRequiredMixin, TemplateView):
         return super().dispatch(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
+        if not request.user.is_authenticated:
+            messages.info(request, "Sign in before accepting this invite.")
+            sign_in_view = "dev_sign_in" if settings.FOCUS_ENABLE_DEV_SIGN_IN else "passkey_sign_in"
+            return redirect(url_with_next_path(sign_in_view, request.path))
+
         existing_membership = user_group_membership(request.user, self.invitation.group)
         if existing_membership:
             messages.info(request, "You already belong to this production group.")
@@ -752,7 +761,15 @@ class InvitationAcceptView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["invitation"] = self.invitation
-        context["already_member"] = user_group_membership(self.request.user, self.invitation.group) is not None
+        context["already_member"] = (
+            self.request.user.is_authenticated
+            and user_group_membership(self.request.user, self.invitation.group) is not None
+        )
+        context["can_accept_invite"] = self.request.user.is_authenticated
+        context["can_use_development_sign_in"] = settings.FOCUS_ENABLE_DEV_SIGN_IN
+        context["passkey_sign_in_url"] = url_with_next_path("passkey_sign_in", self.request.path)
+        context["backup_key_sign_in_url"] = url_with_next_path("backup_key_sign_in", self.request.path)
+        context["dev_sign_in_url"] = url_with_next_path("dev_sign_in", self.request.path)
         return context
 
 

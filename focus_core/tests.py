@@ -1474,6 +1474,67 @@ class InvitationFlowTests(TestCase):
         self.assertContains(response, str(invitation.token))
         self.assertContains(response, "Create invite link")
 
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_signed_out_user_can_preview_unused_invite(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        invite_path = reverse("invite_accept", kwargs={"token": invitation.token})
+        encoded_next = f"%2Finvites%2F{invitation.token}%2F"
+
+        response = self.client.get(invite_path)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Join Studio")
+        self.assertContains(response, "This invite will add you to Studio as Script Writer.")
+        self.assertContains(response, "Sign in first, then FOCUS will bring you back here to accept the invite.")
+        self.assertContains(response, f"{reverse('passkey_sign_in')}?next={encoded_next}")
+        self.assertContains(response, f"{reverse('backup_key_sign_in')}?next={encoded_next}")
+        self.assertContains(response, f"{reverse('dev_sign_in')}?next={encoded_next}")
+        self.assertNotContains(response, "Accept invite")
+        self.assertFalse(invitation.is_used)
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
+    def test_signed_out_invite_preview_hides_development_sign_in_when_disabled(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+
+        response = self.client.get(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sign in with passkey")
+        self.assertContains(response, "Use a backup key")
+        self.assertNotContains(response, "Use development sign in")
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_signed_out_user_posting_invite_redirects_to_sign_in(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        invite_path = reverse("invite_accept", kwargs={"token": invitation.token})
+
+        response = self.client.post(invite_path)
+
+        self.assertRedirects(response, f"{reverse('dev_sign_in')}?next=%2Finvites%2F{invitation.token}%2F")
+        self.assertFalse(GroupInvitation.objects.get(pk=invitation.pk).is_used)
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
+    def test_signed_out_invite_post_uses_passkey_sign_in_when_development_is_disabled(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        invite_path = reverse("invite_accept", kwargs={"token": invitation.token})
+
+        response = self.client.post(invite_path)
+
+        self.assertRedirects(response, f"{reverse('passkey_sign_in')}?next=%2Finvites%2F{invitation.token}%2F")
+        self.assertFalse(GroupInvitation.objects.get(pk=invitation.pk).is_used)
+
     def test_signed_in_user_can_accept_unused_invite(self):
         owner = FocusUser.objects.create(display_name="Owner")
         new_member = FocusUser.objects.create(display_name="New Member")

@@ -18,6 +18,16 @@
             <p>You already belong to {{ invitation.group.name }}.</p>
             <a class="button" href="{% url 'group_detail' invitation.group.slug %}">Open {{ invitation.group.name }}</a>
         </div>
+    {% elif not can_accept_invite %}
+        <p>This invite will add you to {{ invitation.group.name }} as {{ invitation.get_role_to_assign_display }}.</p>
+        <p>Sign in first, then FOCUS will bring you back here to accept the invite.</p>
+        <div class="action-row">
+            <a class="button" href="{{ passkey_sign_in_url }}">Sign in with passkey</a>
+            <a class="button button--secondary" href="{{ backup_key_sign_in_url }}">Use a backup key</a>
+            {% if can_use_development_sign_in %}
+                <a class="button button--secondary" href="{{ dev_sign_in_url }}">Use development sign in</a>
+            {% endif %}
+        </div>
     {% else %}
         <p>This invite will add you to {{ invitation.group.name }} as {{ invitation.get_role_to_assign_display }}.</p>
         <form method="post" class="form-stack">

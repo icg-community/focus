@@ -113,6 +113,13 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("dev_sign_in"), response["Location"])
 
+    def test_protected_page_redirect_includes_original_destination(self):
+        response = self.client.get(reverse("profile"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dev_sign_in"), response["Location"])
+        self.assertIn("next=/profile/", response["Location"])
+
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
     def test_development_sign_in_creates_pseudonymous_session(self):
         response = self.client.post(reverse("dev_sign_in"), follow=True)
@@ -122,6 +129,18 @@ class ProductionFlowTests(TestCase):
         self.assertTrue(AuthIdentity.objects.filter(provider="GITHUB", subject_id="focus-dev-user").exists())
 
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_sign_in_redirects_to_safe_next_destination(self):
+        response = self.client.post(f"{reverse('dev_sign_in')}?next=/profile/")
+
+        self.assertRedirects(response, reverse("profile"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_sign_in_ignores_external_next_destination(self):
+        response = self.client.post(f"{reverse('dev_sign_in')}?next=https://example.com/profile")
+
+        self.assertRedirects(response, reverse("dashboard"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
     def test_development_sign_in_links_to_backup_key_sign_in(self):
         response = self.client.get(reverse("dev_sign_in"))
 
@@ -129,6 +148,13 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, reverse("passkey_sign_in"))
         self.assertContains(response, "Use a saved backup key instead")
         self.assertContains(response, reverse("backup_key_sign_in"))
+
+    @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
+    def test_development_sign_in_preserves_next_on_method_links(self):
+        response = self.client.get(f"{reverse('dev_sign_in')}?next=/profile/")
+
+        self.assertContains(response, f"{reverse('passkey_sign_in')}?next=%2Fprofile%2F")
+        self.assertContains(response, f"{reverse('backup_key_sign_in')}?next=%2Fprofile%2F")
 
     def test_passkey_sign_in_page_has_accessible_status_and_fallback_links(self):
         response = self.client.get(reverse("passkey_sign_in"))
@@ -140,6 +166,20 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Passkey sign in needs JavaScript")
         self.assertContains(response, reverse("backup_key_sign_in"))
         self.assertContains(response, reverse("dev_sign_in"))
+
+    def test_passkey_sign_in_page_preserves_next_on_links_and_requests(self):
+        response = self.client.get(f"{reverse('passkey_sign_in')}?next=/profile/")
+
+        self.assertContains(response, f"{reverse('backup_key_sign_in')}?next=%2Fprofile%2F")
+        self.assertContains(response, f"{reverse('dev_sign_in')}?next=%2Fprofile%2F")
+        self.assertEqual(
+            response.context["passkey_authentication_options_url"],
+            f"{reverse('passkey_authentication_options')}?next=%2Fprofile%2F",
+        )
+        self.assertEqual(
+            response.context["passkey_authentication_complete_url"],
+            f"{reverse('passkey_authentication_complete')}?next=%2Fprofile%2F",
+        )
 
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=False)
     def test_passkey_sign_in_page_hides_development_link_when_disabled(self):
@@ -157,6 +197,14 @@ class ProductionFlowTests(TestCase):
 
         self.assertRedirects(response, reverse("dashboard"))
 
+    def test_passkey_sign_in_redirects_signed_in_user_to_safe_next_destination(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(f"{reverse('passkey_sign_in')}?next=/profile/")
+
+        self.assertRedirects(response, reverse("profile"))
+
     def test_passkey_authentication_options_store_challenge_without_account_identifier(self):
         response = self.client.post(reverse("passkey_authentication_options"))
         data = response.json()
@@ -170,6 +218,19 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(self.client.session["passkey_authentication_challenge"], data["challenge"])
         self.assertEqual(self.client.session["passkey_authentication_rp_id"], "testserver")
         self.assertEqual(self.client.session["passkey_authentication_origin"], "http://testserver")
+        self.assertEqual(self.client.session["passkey_authentication_next"], reverse("dashboard"))
+
+    def test_passkey_authentication_options_store_safe_next_destination(self):
+        response = self.client.post(f"{reverse('passkey_authentication_options')}?next=/profile/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session["passkey_authentication_next"], reverse("profile"))
+
+    def test_passkey_authentication_options_ignore_external_next_destination(self):
+        response = self.client.post(f"{reverse('passkey_authentication_options')}?next=https://example.com/profile")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session["passkey_authentication_next"], reverse("dashboard"))
 
     def test_passkey_authentication_complete_signs_in_and_updates_passkey(self):
         user = FocusUser.objects.create(display_name="Creator")
@@ -184,6 +245,7 @@ class ProductionFlowTests(TestCase):
         session["passkey_authentication_challenge"] = bytes_to_base64url(b"challenge")
         session["passkey_authentication_rp_id"] = "testserver"
         session["passkey_authentication_origin"] = "http://testserver"
+        session["passkey_authentication_next"] = reverse("profile")
         session.save()
         verification = SimpleNamespace(
             credential_id=b"credential-id",
@@ -200,7 +262,7 @@ class ProductionFlowTests(TestCase):
         passkey.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
-        self.assertEqual(response.json()["redirect_url"], reverse("dashboard"))
+        self.assertEqual(response.json()["redirect_url"], reverse("profile"))
         self.assertEqual(self.client.session["_auth_user_id"], str(user.pk))
         self.assertEqual(passkey.sign_count, 8)
         self.assertIsNotNone(passkey.last_used_at)
@@ -277,6 +339,30 @@ class ProductionFlowTests(TestCase):
         dashboard_response = self.client.get(reverse("dashboard"))
         self.assertContains(dashboard_response, "Signed in as Creator")
 
+    def test_backup_key_sign_in_redirects_to_safe_next_destination(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        recovery_code = RecoveryCode.create_for_code(user, "2345-6789-ABCD-EFGH")
+
+        response = self.client.post(
+            f"{reverse('backup_key_sign_in')}?next=/profile/",
+            {"backup_key": "2345 6789 abcd efgh"},
+        )
+
+        recovery_code.refresh_from_db()
+        self.assertRedirects(response, reverse("profile"))
+        self.assertIsNotNone(recovery_code.used_at)
+
+    def test_backup_key_sign_in_ignores_external_next_destination(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        RecoveryCode.create_for_code(user, "2345-6789-ABCD-EFGH")
+
+        response = self.client.post(
+            f"{reverse('backup_key_sign_in')}?next=https://example.com/profile",
+            {"backup_key": "2345 6789 abcd efgh"},
+        )
+
+        self.assertRedirects(response, reverse("dashboard"))
+
     def test_backup_key_sign_in_rejects_used_code(self):
         user = FocusUser.objects.create(display_name="Creator")
         recovery_code = RecoveryCode.create_for_code(user, "2345-6789-ABCD-EFGH")
@@ -307,11 +393,24 @@ class ProductionFlowTests(TestCase):
 
         self.assertRedirects(response, reverse("dashboard"))
 
+    def test_backup_key_sign_in_redirects_signed_in_user_to_safe_next_destination(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(f"{reverse('backup_key_sign_in')}?next=/profile/")
+
+        self.assertRedirects(response, reverse("profile"))
+
     def test_backup_key_sign_in_links_to_passkey_sign_in(self):
         response = self.client.get(reverse("backup_key_sign_in"))
 
         self.assertContains(response, "Use a passkey instead")
         self.assertContains(response, reverse("passkey_sign_in"))
+
+    def test_backup_key_sign_in_preserves_next_on_passkey_link(self):
+        response = self.client.get(f"{reverse('backup_key_sign_in')}?next=/profile/")
+
+        self.assertContains(response, f"{reverse('passkey_sign_in')}?next=%2Fprofile%2F")
 
     def test_group_create_adds_current_user_as_owner(self):
         user = FocusUser.objects.create(display_name="Creator")

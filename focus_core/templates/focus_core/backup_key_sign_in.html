@@ -13,6 +13,6 @@
         {% include "focus_core/includes/field.html" with field=form.backup_key %}
         <button type="submit" class="button">Sign in with backup key</button>
     </form>
-    <p><a href="{% url 'passkey_sign_in' %}">Use a passkey instead</a></p>
+    <p><a href="{{ passkey_sign_in_url }}">Use a passkey instead</a></p>
 </div>
 {% endblock %}

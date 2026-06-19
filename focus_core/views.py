@@ -13,6 +13,7 @@ from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.http import urlencode, url_has_allowed_host_and_scheme
 from django.utils.text import slugify
 from django.views import View
 from django.views.generic import CreateView, DetailView, FormView, TemplateView, UpdateView
@@ -38,6 +39,7 @@ PASSKEY_REGISTRATION_ORIGIN_SESSION_KEY = "passkey_registration_origin"
 PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY = "passkey_authentication_challenge"
 PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY = "passkey_authentication_rp_id"
 PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
+PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY = "passkey_authentication_next"
 
 
 def unique_group_slug(name):
@@ -79,6 +81,25 @@ def credential_id_bytes(credential):
     return base64url_to_bytes(credential.credential_id)
 
 
+def safe_next_url(request):
+    next_url = request.GET.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return reverse("dashboard")
+
+
+def url_with_next(request, view_name):
+    url = reverse(view_name)
+    next_url = request.GET.get("next")
+    if next_url and safe_next_url(request) == next_url:
+        return f"{url}?{urlencode({'next': next_url})}"
+    return url
+
+
 def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
     identities = user.identities.all()
     if excluding_identity:
@@ -104,6 +125,12 @@ class DevSignInView(FormView):
             raise Http404()
         return super().dispatch(request, *args, **kwargs)
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["passkey_sign_in_url"] = url_with_next(self.request, "passkey_sign_in")
+        context["backup_key_sign_in_url"] = url_with_next(self.request, "backup_key_sign_in")
+        return context
+
     def post(self, request, *args, **kwargs):
         user_model = get_user_model()
         user, _ = user_model.objects.get_or_create(
@@ -117,7 +144,7 @@ class DevSignInView(FormView):
             defaults={"handle": "dev_creator"},
         )
         login(request, user, backend="django.contrib.auth.backends.ModelBackend")
-        return redirect(request.GET.get("next") or reverse("dashboard"))
+        return redirect(safe_next_url(request))
 
 
 class BackupKeySignInView(FormView):
@@ -126,8 +153,13 @@ class BackupKeySignInView(FormView):
 
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return redirect("dashboard")
+            return redirect(safe_next_url(request))
         return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["passkey_sign_in_url"] = url_with_next(self.request, "passkey_sign_in")
+        return context
 
     def form_valid(self, form):
         backup_key = form.cleaned_data["backup_key"]
@@ -138,7 +170,7 @@ class BackupKeySignInView(FormView):
                     recovery_code.mark_used()
                     login(self.request, user, backend="django.contrib.auth.backends.ModelBackend")
                     messages.success(self.request, "You are signed in. That backup key has now been used.")
-                    return redirect("dashboard")
+                    return redirect(safe_next_url(self.request))
 
         form.add_error("backup_key", "That backup key did not work. Check it and try again.")
         return self.form_invalid(form)
@@ -149,19 +181,23 @@ class PasskeySignInView(TemplateView):
 
     def dispatch(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return redirect("dashboard")
+            return redirect(safe_next_url(request))
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["can_use_development_sign_in"] = settings.FOCUS_ENABLE_DEV_SIGN_IN
+        context["backup_key_sign_in_url"] = url_with_next(self.request, "backup_key_sign_in")
+        context["dev_sign_in_url"] = url_with_next(self.request, "dev_sign_in")
+        context["passkey_authentication_options_url"] = url_with_next(self.request, "passkey_authentication_options")
+        context["passkey_authentication_complete_url"] = url_with_next(self.request, "passkey_authentication_complete")
         return context
 
 
 class PasskeyAuthenticationOptionsView(View):
     def post(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
+            return JsonResponse({"ok": True, "redirect_url": safe_next_url(request)})
 
         rp_id = request_rp_id(request)
         origin = request_origin(request)
@@ -173,17 +209,19 @@ class PasskeyAuthenticationOptionsView(View):
         request.session[PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY] = bytes_to_base64url(options.challenge)
         request.session[PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY] = rp_id
         request.session[PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY] = origin
+        request.session[PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY] = safe_next_url(request)
         return JsonResponse(json.loads(options_to_json(options)))
 
 
 class PasskeyAuthenticationCompleteView(View):
     def post(self, request, *args, **kwargs):
         if request.user.is_authenticated:
-            return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
+            return JsonResponse({"ok": True, "redirect_url": safe_next_url(request)})
 
         challenge = request.session.pop(PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY, None)
         rp_id = request.session.pop(PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY, None)
         origin = request.session.pop(PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY, None)
+        next_url = request.session.pop(PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY, reverse("dashboard"))
         if not challenge or not rp_id or not origin:
             return JsonResponse({"ok": False, "error": "Start passkey sign in again."}, status=400)
 
@@ -222,7 +260,7 @@ class PasskeyAuthenticationCompleteView(View):
         passkey.save(update_fields=["sign_count", "last_used_at"])
         login(request, passkey.user, backend="django.contrib.auth.backends.ModelBackend")
         messages.success(request, "You are signed in with a passkey.")
-        return JsonResponse({"ok": True, "redirect_url": reverse("dashboard")})
+        return JsonResponse({"ok": True, "redirect_url": next_url})
 
 
 class DashboardView(LoginRequiredMixin, TemplateView):

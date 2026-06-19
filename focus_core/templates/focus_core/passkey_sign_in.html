@@ -18,9 +18,9 @@
             <p class="field-errors">Error: Passkey sign in needs JavaScript and a browser that supports passkeys.</p>
         </noscript>
     </form>
-    <p><a href="{% url 'backup_key_sign_in' %}">Use a backup key instead</a></p>
+    <p><a href="{{ backup_key_sign_in_url }}">Use a backup key instead</a></p>
     {% if can_use_development_sign_in %}
-        <p><a href="{% url 'dev_sign_in' %}">Use development sign in instead</a></p>
+        <p><a href="{{ dev_sign_in_url }}">Use development sign in instead</a></p>
     {% endif %}
 </div>
 
@@ -115,7 +115,7 @@
         button.disabled = true;
         setStatus("Starting passkey sign in.");
         try {
-            const options = await fetchJson("{% url 'passkey_authentication_options' %}");
+            const options = await fetchJson("{{ passkey_authentication_options_url|escapejs }}");
             if (options.redirect_url) {
                 window.location.href = options.redirect_url;
                 return;
@@ -128,7 +128,7 @@
                 throw new Error("Passkey sign in was cancelled.");
             }
             setStatus("Checking passkey.");
-            const result = await fetchJson("{% url 'passkey_authentication_complete' %}", {
+            const result = await fetchJson("{{ passkey_authentication_complete_url|escapejs }}", {
                 credential: credentialToJson(credential),
             });
             setStatus("Signed in. Opening dashboard.");

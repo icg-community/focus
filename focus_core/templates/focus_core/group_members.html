@@ -16,9 +16,19 @@
         <p class="eyebrow">Production group</p>
         <h1>Members of {{ group.name }}</h1>
     </div>
-    {% if can_manage_members %}
-        <a class="button button--secondary" href="{% url 'group_invitations' group.slug %}">Manage invitations</a>
-    {% endif %}
+    <div class="action-row">
+        {% if can_manage_members %}
+            <a class="button button--secondary" href="{% url 'group_invitations' group.slug %}">Manage invitations</a>
+        {% endif %}
+        {% if can_leave_group %}
+            <form method="post" action="{% url 'membership_leave' group.slug %}" class="inline-form">
+                {% csrf_token %}
+                <button type="submit" class="button button--danger">Leave {{ group.name }}</button>
+            </form>
+        {% else %}
+            <p class="field-help">You are the only group owner, so you cannot leave this group.</p>
+        {% endif %}
+    </div>
 </div>
 
 <div class="table-wrap">

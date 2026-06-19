@@ -669,6 +669,7 @@ class GroupMembersView(LoginRequiredMixin, TemplateView):
         context["group"] = self.group
         context["membership"] = self.membership
         context["can_manage_members"] = can_manage_members
+        context["can_leave_group"] = self.membership.role != Membership.Role.OWNER or self.group.has_another_owner(self.membership)
         context["member_rows"] = [
             {
                 "membership": membership,
@@ -774,6 +775,20 @@ class MembershipRemoveView(LoginRequiredMixin, View):
         if removed_user == request.user:
             return redirect("dashboard")
         return redirect("group_members", slug=group.slug)
+
+
+class MembershipLeaveView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        membership = get_object_or_404(Membership, group=group, user=request.user)
+        try:
+            membership.delete()
+        except ValidationError as error:
+            messages.error(request, " ".join(error.messages))
+            return redirect("group_members", slug=group.slug)
+
+        messages.success(request, f"You left {group.name}.")
+        return redirect("dashboard")
 
 
 class InvitationAcceptView(TemplateView):

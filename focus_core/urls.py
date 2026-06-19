@@ -38,6 +38,7 @@ urlpatterns = [
         name="group_invitation_revoke",
     ),
     path("groups/<slug:slug>/members/", views.GroupMembersView.as_view(), name="group_members"),
+    path("groups/<slug:slug>/leave/", views.MembershipLeaveView.as_view(), name="membership_leave"),
     path("groups/<slug:slug>/members/<int:pk>/", views.MemberProfileView.as_view(), name="member_profile"),
     path(
         "groups/<slug:slug>/members/<int:pk>/role/",

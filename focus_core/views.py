@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -552,7 +552,20 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
             projects = projects.filter(status=selected_status)
 
         detail_url = reverse("group_detail", kwargs={"slug": self.object.slug})
-        context["projects"] = projects.order_by("-updated_at", "title")
+        projects = projects.order_by("-updated_at", "title").prefetch_related(
+            Prefetch(
+                "notes",
+                queryset=ProjectNote.objects.select_related("author"),
+                to_attr="prefetched_notes",
+            )
+        )
+        context["project_rows"] = [
+            {
+                "project": project,
+                "latest_note": project.prefetched_notes[0] if project.prefetched_notes else None,
+            }
+            for project in projects
+        ]
         context["project_total_count"] = all_projects.count()
         context["selected_status"] = selected_status
         context["status_filters"] = [

@@ -1171,6 +1171,36 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Edit Pass")
         self.assertContains(response, "All projects (2)")
 
+    def test_group_detail_shows_latest_project_note(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        ProjectNote.objects.create(project=project, author=producer, body="Older note.")
+        ProjectNote.objects.create(project=project, author=editor, body="Latest handoff note.")
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Latest note")
+        self.assertContains(response, "Latest handoff note.")
+        self.assertContains(response, "By Editor")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}) + "#project-notes")
+        self.assertNotContains(response, "Older note.")
+
+    def test_group_detail_shows_empty_latest_note_state(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "No notes yet.")
+
     def test_group_detail_explains_empty_status_filter(self):
         user = FocusUser.objects.create(display_name="Producer")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")

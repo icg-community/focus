@@ -40,7 +40,7 @@
         </nav>
     {% endif %}
 
-    {% if projects %}
+    {% if project_rows %}
         <div class="table-wrap">
             <table>
                 <caption>Projects in {{ object.name }}</caption>
@@ -49,19 +49,31 @@
                         <th scope="col">Title</th>
                         <th scope="col">Status</th>
                         <th scope="col">Updated</th>
+                        <th scope="col">Latest note</th>
                         <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {% for project in projects %}
+                    {% for row in project_rows %}
+                        {% with project=row.project %}
                         <tr>
                             <th scope="row">
                                 <a href="{% url 'project_detail' object.slug project.pk %}">{{ project.title }}</a>
                             </th>
                             <td>{{ project.get_status_display }}</td>
                             <td>{{ project.updated_at|date:"M j, Y" }}</td>
+                            <td>
+                                {% if row.latest_note %}
+                                    <p>{{ row.latest_note.body|truncatechars:140 }}</p>
+                                    <p class="field-help">By {{ row.latest_note.author.public_name }} on {{ row.latest_note.created_at|date:"M j, Y" }}</p>
+                                    <a href="{% url 'project_detail' object.slug project.pk %}#project-notes">Open notes for {{ project.title }}</a>
+                                {% else %}
+                                    No notes yet.
+                                {% endif %}
+                            </td>
                             <td><a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a></td>
                         </tr>
+                        {% endwith %}
                     {% endfor %}
                 </tbody>
             </table>

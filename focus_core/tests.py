@@ -1982,6 +1982,43 @@ class MemberManagementFlowTests(TestCase):
         self.assertContains(response, "Editor")
         self.assertNotContains(response, "Other Group Assignment")
 
+    def test_member_profile_shows_latest_note_for_opted_in_assignment(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(display_name="Editor", show_assigned_projects=True)
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=viewer, group=group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.ADMIN)
+        project = VideoProject.objects.create(group=group, title="Visible Assignment")
+        project.assigned_editors.add(member)
+        older_note = ProjectNote.objects.create(project=project, author=member, body="Older profile note.")
+        ProjectNote.objects.filter(pk=older_note.pk).update(created_at=timezone.now() - timedelta(days=1))
+        ProjectNote.objects.create(project=project, author=producer, body="Latest profile handoff.")
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertContains(response, "Latest note")
+        self.assertContains(response, "Latest profile handoff.")
+        self.assertContains(response, "By Producer")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}) + "#project-notes")
+        self.assertNotContains(response, "Older profile note.")
+
+    def test_member_profile_shows_empty_latest_note_state_for_assignment(self):
+        viewer = FocusUser.objects.create(display_name="Viewer")
+        member = FocusUser.objects.create(display_name="Editor", show_assigned_projects=True)
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=viewer, group=group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Visible Assignment")
+        project.assigned_editors.add(member)
+        self.client.force_login(viewer)
+
+        response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertContains(response, "No notes yet.")
+
     def test_non_member_cannot_view_roster(self):
         user = FocusUser.objects.create(display_name="Outsider")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")

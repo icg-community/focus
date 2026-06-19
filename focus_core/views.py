@@ -701,6 +701,13 @@ class MemberProfileView(LoginRequiredMixin, DetailView):
             assigned_projects = (
                 VideoProject.objects.filter(group=self.group)
                 .filter(Q(assigned_editors=profile_user) | Q(assigned_writers=profile_user))
+                .prefetch_related(
+                    Prefetch(
+                        "notes",
+                        queryset=ProjectNote.objects.select_related("author"),
+                        to_attr="prefetched_notes",
+                    )
+                )
                 .distinct()
                 .order_by("-updated_at", "title")
             )
@@ -718,6 +725,7 @@ class MemberProfileView(LoginRequiredMixin, DetailView):
                     )
                     if profile_user in assignees
                 ],
+                "latest_note": project.prefetched_notes[0] if project.prefetched_notes else None,
             }
             for project in assigned_projects.prefetch_related("assigned_editors", "assigned_writers")
         ]

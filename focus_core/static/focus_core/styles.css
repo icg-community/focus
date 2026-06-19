@@ -448,6 +448,29 @@ textarea.field-control {
     gap: 1rem;
 }
 
+.note-list {
+    display: grid;
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.note-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.note-item h4 {
+    margin: 0 0 0.25rem;
+}
+
+.note-item p {
+    margin: 0.5rem 0 0;
+}
+
 .recovery-code-list {
     display: grid;
     gap: 0.5rem;

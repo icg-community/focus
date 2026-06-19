@@ -189,6 +189,19 @@ class VideoProject(models.Model):
         return f"{self.title} ({self.get_status_display()})"
 
 
+class ProjectNote(models.Model):
+    project = models.ForeignKey(VideoProject, on_delete=models.CASCADE, related_name="notes")
+    author = models.ForeignKey(FocusUser, on_delete=models.CASCADE, related_name="project_notes")
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Note on {self.project.title} by {self.author.public_name}"
+
+
 class GroupInvitation(models.Model):
     group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="invitations")
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

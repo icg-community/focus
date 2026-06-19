@@ -56,6 +56,11 @@ urlpatterns = [
         views.ProjectStatusUpdateView.as_view(),
         name="project_status_update",
     ),
+    path(
+        "groups/<slug:group_slug>/projects/<int:pk>/notes/new/",
+        views.ProjectNoteCreateView.as_view(),
+        name="project_note_create",
+    ),
     path("groups/<slug:group_slug>/projects/<int:pk>/edit/", views.ProjectUpdateView.as_view(), name="project_update"),
     path("invites/<uuid:token>/", views.InvitationAcceptView.as_view(), name="invite_accept"),
 ]

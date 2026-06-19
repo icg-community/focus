@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 class FocusUserTests(TestCase):
@@ -1316,6 +1316,86 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, writer.public_name)
         self.assertContains(response, reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "Update status")
+        self.assertContains(response, "Project notes")
+        self.assertContains(response, reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertContains(response, "No notes have been added yet.")
+
+    def test_group_member_can_add_project_note(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(editor)
+
+        response = self.client.post(
+            reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"body": "Script draft updated. Ready for edit pass."},
+        )
+
+        note = ProjectNote.objects.get(project=project)
+        self.assertRedirects(
+            response,
+            f"{reverse('project_detail', kwargs={'group_slug': group.slug, 'pk': project.pk})}#project-notes",
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(note.author, editor)
+        self.assertEqual(note.body, "Script draft updated. Ready for edit pass.")
+
+    def test_project_detail_shows_notes_newest_first(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        older_note = ProjectNote.objects.create(project=project, author=producer, body="First update.")
+        newer_note = ProjectNote.objects.create(project=project, author=editor, body="Second update.")
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        content = response.content.decode()
+
+        self.assertContains(response, older_note.body)
+        self.assertContains(response, newer_note.body)
+        self.assertContains(response, producer.public_name)
+        self.assertContains(response, editor.public_name)
+        self.assertLess(content.index(newer_note.body), content.index(older_note.body))
+
+    def test_project_note_errors_are_exposed_to_assistive_technology(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(producer)
+
+        response = self.client.post(
+            reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"body": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ProjectNote.objects.filter(project=project).exists())
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="body-error"')
+
+    def test_non_member_cannot_add_project_note(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.post(
+            reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"body": "I should not be able to add this."},
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ProjectNote.objects.filter(project=project).exists())
 
     def test_group_member_can_update_project_status_from_detail_page(self):
         producer = FocusUser.objects.create(display_name="Producer")

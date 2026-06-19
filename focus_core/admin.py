@@ -7,6 +7,7 @@ from .models import (
     GroupInvitation,
     Membership,
     ProductionGroup,
+    ProjectNote,
     RecoveryCode,
     VideoProject,
     WebAuthnCredential,
@@ -34,4 +35,5 @@ admin.site.register(WebAuthnCredential)
 admin.site.register(ProductionGroup)
 admin.site.register(Membership)
 admin.site.register(VideoProject)
+admin.site.register(ProjectNote)
 admin.site.register(GroupInvitation)

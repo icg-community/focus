@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, VideoProject, WebAuthnCredential
 
 
 class AccessibleForm(forms.Form):
@@ -195,6 +195,21 @@ class ProjectStatusForm(AccessibleModelForm):
         }
         help_texts = {
             "status": "Choose the current stage for this project.",
+        }
+
+
+class ProjectNoteForm(AccessibleModelForm):
+    class Meta:
+        model = ProjectNote
+        fields = ["body"]
+        labels = {
+            "body": "Project note",
+        }
+        help_texts = {
+            "body": "Share a short update, blocker, or handoff note for this project.",
+        }
+        widgets = {
+            "body": forms.Textarea(attrs={"rows": 4}),
         }
 
 

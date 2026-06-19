@@ -10,7 +10,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.http import Http404, JsonResponse
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import urlencode, url_has_allowed_host_and_scheme
@@ -27,7 +27,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectStatusForm, VideoProjectForm
+from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
 
 
@@ -840,7 +840,42 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context = super().get_context_data(**kwargs)
         context["group"] = self.object.group
         context.setdefault("status_form", ProjectStatusForm(instance=self.object))
+        context.setdefault("note_form", ProjectNoteForm())
+        context["notes"] = self.object.notes.select_related("author")
         return context
+
+
+class ProjectNoteCreateView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            )
+            .select_related("group")
+            .prefetch_related("assigned_editors", "assigned_writers"),
+            pk=self.kwargs["pk"],
+        )
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        form = ProjectNoteForm(request.POST)
+        if form.is_valid():
+            note = form.save(commit=False)
+            note.project = project
+            note.author = request.user
+            note.save()
+            messages.success(request, "Project note added.")
+            return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-notes")
+
+        context = {
+            "object": project,
+            "group": project.group,
+            "status_form": ProjectStatusForm(instance=project),
+            "note_form": form,
+            "notes": project.notes.select_related("author"),
+        }
+        return render(request, "focus_core/project_detail.html", context)
 
 
 class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
@@ -867,6 +902,8 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         context = super().get_context_data(**kwargs)
         context["group"] = self.object.group
         context["status_form"] = context["form"]
+        context["note_form"] = ProjectNoteForm()
+        context["notes"] = self.object.notes.select_related("author")
         return context
 
     def get_success_url(self):

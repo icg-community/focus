@@ -96,4 +96,39 @@
         </section>
     </div>
 </section>
+
+<section class="section-block" id="project-notes">
+    <h2>Project notes</h2>
+    <section class="content-narrow">
+        <h3>Add a note</h3>
+        {% include "focus_core/includes/form_errors.html" with form=note_form %}
+        <form method="post" action="{% url 'project_note_create' group.slug object.pk %}" class="form-stack" novalidate>
+            {% csrf_token %}
+            <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+            {% include "focus_core/includes/field.html" with field=note_form.body %}
+            <button type="submit" class="button">Add note</button>
+        </form>
+    </section>
+
+    <section class="section-block">
+        <h3>Note history</h3>
+        {% if notes %}
+            <ol class="note-list">
+                {% for note in notes %}
+                    <li class="note-item">
+                        <article>
+                            <h4>{{ note.author.public_name }}</h4>
+                            <p class="field-help">{{ note.created_at|date:"M j, Y, g:i a" }}</p>
+                            <p>{{ note.body|linebreaksbr }}</p>
+                        </article>
+                    </li>
+                {% endfor %}
+            </ol>
+        {% else %}
+            <div class="empty-state">
+                <p>No notes have been added yet.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
 {% endblock %}

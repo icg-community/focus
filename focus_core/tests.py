@@ -2075,6 +2075,30 @@ class MemberManagementFlowTests(TestCase):
         self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
         self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
 
+    def test_removed_member_loses_group_access(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        owner_membership = Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Private Project")
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("membership_remove", kwargs={"slug": group.slug, "pk": membership.pk}))
+
+        self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
+        self.client.force_login(member)
+        self.assertEqual(self.client.get(reverse("group_detail", kwargs={"slug": group.slug})).status_code, 404)
+        self.assertEqual(self.client.get(reverse("group_members", kwargs={"slug": group.slug})).status_code, 404)
+        self.assertEqual(
+            self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": owner_membership.pk})).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk})).status_code,
+            404,
+        )
+
     def test_non_owner_cannot_remove_member(self):
         editor = FocusUser.objects.create(display_name="Editor")
         writer = FocusUser.objects.create(display_name="Writer")
@@ -2119,6 +2143,17 @@ class MemberManagementFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "A production group must keep at least one owner.")
         self.assertTrue(Membership.objects.filter(pk=membership.pk).exists())
+
+    def test_only_owner_remove_action_is_not_shown(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        membership = Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("group_members", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "This member is the only group owner, so they cannot be removed.")
+        self.assertNotContains(response, reverse("membership_remove", kwargs={"slug": group.slug, "pk": membership.pk}))
 
     def test_owner_forms_have_unique_accessible_descriptions(self):
         owner = FocusUser.objects.create(display_name="Owner")

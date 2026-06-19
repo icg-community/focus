@@ -56,10 +56,14 @@
                                     </div>
                                     <button type="submit" class="button">Save role for {{ row.membership.user.public_name }}</button>
                                 </form>
-                                <form method="post" action="{% url 'membership_remove' group.slug row.membership.pk %}" class="inline-form">
-                                    {% csrf_token %}
-                                    <button type="submit" class="button button--danger">Remove {{ row.membership.user.public_name }}</button>
-                                </form>
+                                {% if row.can_remove %}
+                                    <form method="post" action="{% url 'membership_remove' group.slug row.membership.pk %}" class="inline-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button button--danger">Remove {{ row.membership.user.public_name }}</button>
+                                    </form>
+                                {% else %}
+                                    <p class="field-help">This member is the only group owner, so they cannot be removed.</p>
+                                {% endif %}
                             </div>
                         </td>
                     {% endif %}

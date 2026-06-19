@@ -676,6 +676,7 @@ class GroupMembersView(LoginRequiredMixin, TemplateView):
                     instance=membership,
                     prefix=f"membership-{membership.pk}",
                 ),
+                "can_remove": membership.role != Membership.Role.OWNER or self.group.has_another_owner(membership),
             }
             for membership in members
         ]

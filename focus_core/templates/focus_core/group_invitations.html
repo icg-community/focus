@@ -32,6 +32,7 @@
 <section class="section-block">
     <h2>Invite links</h2>
     {% if invite_rows %}
+        <p id="invite-copy-status" class="copy-status" role="status" aria-live="polite" aria-atomic="true"></p>
         <div class="table-wrap" role="region" aria-label="Invite links table" tabindex="0">
             <table>
                 <caption>Invite links for {{ group.name }}</caption>
@@ -58,15 +59,38 @@
                                 {% endif %}
                             </td>
                             <td>{{ row.invitation.created_at|date:"M j, Y" }}</td>
-                            <td><a href="{{ row.accept_url }}">Open invite for {{ row.invitation.get_role_to_assign_display }}</a></td>
                             <td>
                                 {% if not row.invitation.is_used and not row.invitation.revoked_at %}
-                                    <form method="post" action="{% url 'group_invitation_revoke' group.slug row.invitation.pk %}" class="inline-form">
-                                        {% csrf_token %}
-                                        <button type="submit" class="button button--danger">Revoke invite for {{ row.invitation.get_role_to_assign_display }}</button>
-                                    </form>
+                                    <div class="copy-link-group">
+                                        <label class="visually-hidden" for="invite-url-{{ row.invitation.pk }}">Invite URL for {{ row.invitation.get_role_to_assign_display }}</label>
+                                        <input id="invite-url-{{ row.invitation.pk }}" class="field-control copy-link-input" type="text" value="{{ row.accept_url }}" readonly>
+                                        <a href="{{ row.accept_url }}">Open invite for {{ row.invitation.get_role_to_assign_display }}</a>
+                                    </div>
                                 {% else %}
-                                    No action available
+                                    <a href="{{ row.accept_url }}">Open invite for {{ row.invitation.get_role_to_assign_display }}</a>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if not row.invitation.is_used and not row.invitation.revoked_at %}
+                                    <div class="table-actions">
+                                        <button
+                                            type="button"
+                                            class="button button--secondary"
+                                            data-copy-target="invite-url-{{ row.invitation.pk }}"
+                                            data-copy-default-label="Copy invite link for {{ row.invitation.get_role_to_assign_display }}"
+                                            data-copy-success-label="Copied invite link for {{ row.invitation.get_role_to_assign_display }}"
+                                            data-copy-success-message="Invite link copied for {{ row.invitation.get_role_to_assign_display }}."
+                                            data-copy-fallback-message="Invite link selected for {{ row.invitation.get_role_to_assign_display }}. Use your browser or keyboard copy command."
+                                        >Copy invite link for {{ row.invitation.get_role_to_assign_display }}</button>
+                                        <form method="post" action="{% url 'group_invitation_revoke' group.slug row.invitation.pk %}" class="inline-form">
+                                            {% csrf_token %}
+                                            <button type="submit" class="button button--danger">Revoke invite for {{ row.invitation.get_role_to_assign_display }}</button>
+                                        </form>
+                                    </div>
+                                {% elif row.invitation.revoked_at %}
+                                    <p class="field-help">Copying is unavailable because this invite has been revoked.</p>
+                                {% else %}
+                                    <p class="field-help">Copying is unavailable because this invite has already been used.</p>
                                 {% endif %}
                             </td>
                         </tr>
@@ -81,4 +105,47 @@
         </div>
     {% endif %}
 </section>
+{% if invite_rows %}
+<script>
+(function () {
+    const status = document.getElementById("invite-copy-status");
+    const buttons = document.querySelectorAll("[data-copy-target]");
+
+    function selectInviteUrl(input) {
+        input.focus({ preventScroll: true });
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+    }
+
+    buttons.forEach(function (button) {
+        button.addEventListener("click", async function () {
+            const input = document.getElementById(button.dataset.copyTarget);
+            if (!input) {
+                return;
+            }
+
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(input.value);
+                } else {
+                    selectInviteUrl(input);
+                    if (!document.execCommand("copy")) {
+                        throw new Error("Copy command failed.");
+                    }
+                    button.focus();
+                }
+                status.textContent = button.dataset.copySuccessMessage;
+                button.textContent = button.dataset.copySuccessLabel;
+                window.setTimeout(function () {
+                    button.textContent = button.dataset.copyDefaultLabel;
+                }, 2000);
+            } catch (error) {
+                selectInviteUrl(input);
+                status.textContent = button.dataset.copyFallbackMessage;
+            }
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

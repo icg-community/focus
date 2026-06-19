@@ -1475,6 +1475,9 @@ class InvitationFlowTests(TestCase):
         self.assertContains(response, str(invitation.token))
         self.assertContains(response, "Create invite link")
         self.assertContains(response, "Available")
+        self.assertContains(response, f'id="invite-url-{invitation.pk}"')
+        self.assertContains(response, "Copy invite link for Script Writer")
+        self.assertContains(response, 'role="status"')
         self.assertContains(response, "Revoke invite for Script Writer")
 
     def test_owner_can_revoke_unused_invite_link(self):
@@ -1538,6 +1541,25 @@ class InvitationFlowTests(TestCase):
 
         self.assertContains(response, "Revoked")
         self.assertNotContains(response, reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
+        self.assertNotContains(response, "Copy invite link for Script Writer")
+        self.assertContains(response, "Copying is unavailable because this invite has been revoked.")
+
+    def test_used_invite_status_hides_copy_action(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        GroupInvitation.objects.create(
+            group=group,
+            role_to_assign=Membership.Role.WRITER,
+            is_used=True,
+        )
+        self.client.force_login(owner)
+
+        response = self.client.get(reverse("group_invitations", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Used")
+        self.assertNotContains(response, "Copy invite link for Script Writer")
+        self.assertContains(response, "Copying is unavailable because this invite has already been used.")
 
     @override_settings(FOCUS_ENABLE_DEV_SIGN_IN=True)
     def test_signed_out_user_can_preview_unused_invite(self):

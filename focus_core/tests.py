@@ -1417,6 +1417,44 @@ class ProductionFlowTests(TestCase):
         self.assertRedirects(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertEqual(project.status, VideoProject.Status.REVIEW)
 
+    def test_status_update_creates_project_note(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+        )
+        self.client.force_login(producer)
+
+        self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        note = ProjectNote.objects.get(project=project)
+        self.assertEqual(note.author, producer)
+        self.assertEqual(note.body, "Status changed from Scripting to In Internal Review.")
+
+    def test_same_status_update_does_not_create_project_note(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+        )
+        self.client.force_login(producer)
+
+        self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.SCRIPTING},
+        )
+
+        self.assertFalse(ProjectNote.objects.filter(project=project).exists())
+
     def test_project_status_update_errors_are_exposed_to_assistive_technology(self):
         producer = FocusUser.objects.create(display_name="Producer")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
@@ -1432,6 +1470,7 @@ class ProductionFlowTests(TestCase):
         project.refresh_from_db()
         self.assertEqual(response.status_code, 200)
         self.assertEqual(project.status, VideoProject.Status.IDEA)
+        self.assertFalse(ProjectNote.objects.filter(project=project).exists())
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-invalid="true"')
         self.assertContains(response, 'id="status-error"')

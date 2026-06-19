@@ -28,7 +28,7 @@ from webauthn.helpers.structs import (
 )
 
 from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -894,7 +894,18 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         )
 
     def form_valid(self, form):
+        previous_status = VideoProject.objects.values_list("status", flat=True).get(pk=self.object.pk)
         response = super().form_valid(form)
+        if previous_status != self.object.status:
+            ProjectNote.objects.create(
+                project=self.object,
+                author=self.request.user,
+                body=(
+                    "Status changed from "
+                    f"{dict(VideoProject.Status.choices)[previous_status]} "
+                    f"to {self.object.get_status_display()}."
+                ),
+            )
         messages.success(self.request, f"Updated {self.object.title}'s status.")
         return response
 

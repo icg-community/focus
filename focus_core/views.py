@@ -277,7 +277,15 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             VideoProject.objects.filter(group__members__user=user)
             .filter(Q(assigned_editors=user) | Q(assigned_writers=user))
             .select_related("group")
-            .prefetch_related("assigned_editors", "assigned_writers")
+            .prefetch_related(
+                "assigned_editors",
+                "assigned_writers",
+                Prefetch(
+                    "notes",
+                    queryset=ProjectNote.objects.select_related("author"),
+                    to_attr="prefetched_notes",
+                ),
+            )
             .distinct()
             .order_by("-updated_at", "title")
         )
@@ -293,6 +301,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                     )
                     if user in assignees
                 ],
+                "latest_note": project.prefetched_notes[0] if project.prefetched_notes else None,
             }
             for project in assigned_projects
         ]

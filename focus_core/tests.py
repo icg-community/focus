@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -453,6 +454,39 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Editor, Writer")
         self.assertContains(response, "Currently Being Edited")
         self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+    def test_dashboard_shows_latest_note_for_assigned_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        project.assigned_writers.add(creator)
+        older_note = ProjectNote.objects.create(project=project, author=creator, body="Older dashboard note.")
+        ProjectNote.objects.filter(pk=older_note.pk).update(created_at=timezone.now() - timedelta(days=1))
+        ProjectNote.objects.create(project=project, author=editor, body="Latest dashboard handoff.")
+        self.client.force_login(creator)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Latest note")
+        self.assertContains(response, "Latest dashboard handoff.")
+        self.assertContains(response, "By Editor")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}) + "#project-notes")
+        self.assertNotContains(response, "Older dashboard note.")
+
+    def test_dashboard_shows_empty_latest_note_state_for_assigned_project(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        project.assigned_writers.add(user)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "No notes yet.")
 
     def test_dashboard_does_not_show_assignments_outside_user_groups(self):
         user = FocusUser.objects.create(display_name="Creator")

@@ -24,6 +24,7 @@
                         <th scope="col">Role</th>
                         <th scope="col">Status</th>
                         <th scope="col">Updated</th>
+                        <th scope="col">Latest note</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -36,6 +37,15 @@
                             <td>{{ row.roles|join:", " }}</td>
                             <td>{{ row.project.get_status_display }}</td>
                             <td>{{ row.project.updated_at|date:"M j, Y" }}</td>
+                            <td>
+                                {% if row.latest_note %}
+                                    <p>{{ row.latest_note.body|truncatechars:140 }}</p>
+                                    <p class="field-help">By {{ row.latest_note.author.public_name }} on {{ row.latest_note.created_at|date:"M j, Y" }}</p>
+                                    <a href="{% url 'project_detail' row.project.group.slug row.project.pk %}#project-notes">Open notes for {{ row.project.title }}</a>
+                                {% else %}
+                                    No notes yet.
+                                {% endif %}
+                            </td>
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -59,6 +59,31 @@
     {% endif %}
 </section>
 
+<section class="section-block" aria-labelledby="recent-activity-heading">
+    <h2 id="recent-activity-heading">Recent project activity</h2>
+    {% if recent_activity %}
+        <ol class="activity-list">
+            {% for note in recent_activity %}
+                <li class="activity-item">
+                    <h3>
+                        <a href="{% url 'project_detail' note.project.group.slug note.project.pk %}#project-notes">{{ note.project.title }}</a>
+                    </h3>
+                    <p>{{ note.body|truncatechars:180 }}</p>
+                    <p class="field-help">
+                        {{ note.project.group.name }}. By {{ note.author.public_name }} on {{ note.created_at|date:"M j, Y, g:i a" }}{% if note.project.archived_at %}.
+                        Archived project.{% endif %}
+                    </p>
+                </li>
+            {% endfor %}
+        </ol>
+    {% else %}
+        <div class="empty-state">
+            <h3>No project activity yet</h3>
+            <p>Project notes and status updates from your groups will appear here.</p>
+        </div>
+    {% endif %}
+</section>
+
 <section class="section-block">
     <h2>Production groups</h2>
     {% if groups %}

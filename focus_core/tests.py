@@ -488,6 +488,69 @@ class ProductionFlowTests(TestCase):
 
         self.assertContains(response, "No notes yet.")
 
+    def test_dashboard_shows_recent_project_activity_for_user_groups(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.ADMIN)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        ProjectNote.objects.create(project=project, author=producer, body="Review handoff is ready.")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Recent project activity")
+        self.assertContains(response, "Launch Video")
+        self.assertContains(response, "Review handoff is ready.")
+        self.assertContains(response, "Studio. By Producer")
+        self.assertContains(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}) + "#project-notes")
+
+    def test_dashboard_recent_project_activity_hides_other_group_notes(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        hidden_group = ProductionGroup.objects.create(name="Hidden Studio", slug="hidden-studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_user, group=hidden_group, role=Membership.Role.OWNER)
+        visible_project = VideoProject.objects.create(group=group, title="Visible Project")
+        hidden_project = VideoProject.objects.create(group=hidden_group, title="Hidden Project")
+        ProjectNote.objects.create(project=visible_project, author=user, body="Visible update.")
+        ProjectNote.objects.create(project=hidden_project, author=other_user, body="Hidden update.")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Visible update.")
+        self.assertNotContains(response, "Hidden update.")
+        self.assertNotContains(response, "Hidden Project")
+
+    def test_dashboard_recent_project_activity_shows_latest_note_per_project(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        older_note = ProjectNote.objects.create(project=project, author=user, body="Older project update.")
+        ProjectNote.objects.filter(pk=older_note.pk).update(created_at=timezone.now() - timedelta(days=1))
+        ProjectNote.objects.create(project=project, author=user, body="Newer project update.")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Newer project update.")
+        self.assertNotContains(response, "Older project update.")
+
+    def test_dashboard_recent_project_activity_has_empty_state(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "No project activity yet")
+        self.assertContains(response, "Project notes and status updates from your groups will appear here.")
+
     def test_dashboard_does_not_show_assignments_outside_user_groups(self):
         user = FocusUser.objects.create(display_name="Creator")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")

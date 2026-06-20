@@ -313,6 +313,21 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             }
             for project in assigned_projects
         ]
+        recent_notes = (
+            ProjectNote.objects.filter(project__group__members__user=user)
+            .select_related("author", "project", "project__group")
+            .order_by("-created_at")[:30]
+        )
+        recent_activity = []
+        seen_project_ids = set()
+        for note in recent_notes:
+            if note.project_id in seen_project_ids:
+                continue
+            recent_activity.append(note)
+            seen_project_ids.add(note.project_id)
+            if len(recent_activity) == 8:
+                break
+        context["recent_activity"] = recent_activity
         return context
 
 

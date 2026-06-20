@@ -71,6 +71,7 @@ The project is in active development. The current app is a Django application wi
 - Project detail pages show the note history newest first.
 - Group project lists, dashboard assignments, and member profile assignments show the latest note.
 - Latest-note links go directly to the project notes section.
+- Dashboard recent activity shows the latest project note or status update from each project in the user's groups.
 
 ### Accessibility Work So Far
 
@@ -87,7 +88,7 @@ The following areas are not complete yet:
 
 - Production-ready authentication provider integrations beyond the local development provider.
 - More complete project lifecycle controls, such as project deletion or export.
-- Notification or activity feed for project changes, notes, invites, and membership changes.
+- More complete notifications for project changes, notes, invites, and membership changes.
 - Richer project assets and script tracking.
 - More detailed permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.

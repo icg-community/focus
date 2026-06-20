@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, GroupNotification, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 class FocusUserTests(TestCase):
@@ -2489,13 +2489,22 @@ class ProductionFlowTests(TestCase):
             kind=ProjectNotification.Kind.NOTE,
             message="Editor added a note to Private Video.",
         )
+        GroupNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            kind=GroupNotification.Kind.INVITE_ACCEPTED,
+            message="Editor joined Studio as Video Editor.",
+        )
         self.client.force_login(user)
 
         response = self.client.get(reverse("notifications"))
 
-        self.assertContains(response, "Notifications (1 unread)")
+        self.assertContains(response, "Notifications (2 unread)")
         self.assertContains(response, "Editor added a note to Launch Video.")
         self.assertContains(response, "Open Launch Video from notification")
+        self.assertContains(response, "Editor joined Studio as Video Editor.")
+        self.assertContains(response, "Open Studio from notification")
         self.assertContains(response, "Unread.")
         self.assertNotContains(response, "Private Video")
 
@@ -2513,16 +2522,25 @@ class ProductionFlowTests(TestCase):
             kind=ProjectNotification.Kind.NOTE,
             message="Editor added a note to Launch Video.",
         )
+        group_notification = GroupNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            kind=GroupNotification.Kind.MEMBER_ROLE,
+            message="Editor changed Producer's role in Studio to Group Owner.",
+        )
         self.client.force_login(user)
 
         response = self.client.post(reverse("notifications_mark_read"))
 
         notification.refresh_from_db()
+        group_notification.refresh_from_db()
         self.assertRedirects(response, reverse("notifications"))
         self.assertIsNotNone(notification.read_at)
+        self.assertIsNotNone(group_notification.read_at)
 
         page_response = self.client.get(reverse("notifications"))
-        self.assertNotContains(page_response, "Notifications (1 unread)")
+        self.assertNotContains(page_response, "Notifications (2 unread)")
         self.assertContains(page_response, "0 unread")
         self.assertContains(page_response, "Read.")
 
@@ -2587,6 +2605,41 @@ class InvitationFlowTests(TestCase):
         self.assertContains(response, "Copy invite link for Script Writer")
         self.assertContains(response, 'role="status"')
         self.assertContains(response, "Revoke invite for Script Writer")
+
+    def test_invite_creation_notifies_other_owner(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        other_owner = FocusUser.objects.create(display_name="Other Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(owner)
+
+        self.client.post(
+            reverse("group_invitations", kwargs={"slug": group.slug}),
+            {"role_to_assign": Membership.Role.EDITOR},
+        )
+
+        notification = GroupNotification.objects.get(recipient=other_owner)
+        self.assertEqual(notification.actor, owner)
+        self.assertEqual(notification.group, group)
+        self.assertEqual(notification.kind, GroupNotification.Kind.INVITE_CREATED)
+        self.assertEqual(notification.message, "Owner created an invite link for Video Editor in Studio.")
+        self.assertFalse(GroupNotification.objects.filter(recipient=owner).exists())
+
+    def test_invite_revocation_notifies_other_owner(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        other_owner = FocusUser.objects.create(display_name="Other Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        self.client.post(reverse("group_invitation_revoke", kwargs={"slug": group.slug, "pk": invitation.pk}))
+
+        notification = GroupNotification.objects.get(recipient=other_owner)
+        self.assertEqual(notification.kind, GroupNotification.Kind.INVITE_REVOKED)
+        self.assertEqual(notification.message, "Owner revoked an invite link for Script Writer in Studio.")
 
     def test_owner_can_revoke_unused_invite_link(self):
         owner = FocusUser.objects.create(display_name="Owner")
@@ -2746,6 +2799,22 @@ class InvitationFlowTests(TestCase):
         self.assertTrue(
             Membership.objects.filter(user=new_member, group=group, role=Membership.Role.WRITER).exists()
         )
+
+    def test_invite_acceptance_notifies_group_owner(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        new_member = FocusUser.objects.create(display_name="New Member")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        invitation = GroupInvitation.objects.create(group=group, role_to_assign=Membership.Role.WRITER)
+        self.client.force_login(new_member)
+
+        self.client.post(reverse("invite_accept", kwargs={"token": invitation.token}))
+
+        notification = GroupNotification.objects.get(recipient=owner)
+        self.assertEqual(notification.actor, new_member)
+        self.assertEqual(notification.kind, GroupNotification.Kind.INVITE_ACCEPTED)
+        self.assertEqual(notification.message, "New Member joined Studio as Script Writer.")
+        self.assertFalse(GroupNotification.objects.filter(recipient=new_member).exists())
 
     def test_used_invite_cannot_be_reused(self):
         owner = FocusUser.objects.create(display_name="Owner")
@@ -2970,6 +3039,41 @@ class MemberManagementFlowTests(TestCase):
         self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
         self.assertEqual(membership.role, Membership.Role.EDITOR)
 
+    def test_member_role_change_notifies_member_not_actor(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        membership = Membership.objects.create(user=member, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        self.client.post(
+            reverse("membership_role_update", kwargs={"slug": group.slug, "pk": membership.pk}),
+            {f"membership-{membership.pk}-role": Membership.Role.EDITOR.value},
+        )
+
+        notification = GroupNotification.objects.get(recipient=member)
+        self.assertEqual(notification.actor, owner)
+        self.assertEqual(notification.group, group)
+        self.assertEqual(notification.kind, GroupNotification.Kind.MEMBER_ROLE)
+        self.assertEqual(notification.message, "Owner changed Writer's role in Studio to Video Editor.")
+        self.assertFalse(GroupNotification.objects.filter(recipient=owner).exists())
+
+    def test_same_member_role_update_does_not_create_notification(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        membership = Membership.objects.create(user=member, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(owner)
+
+        self.client.post(
+            reverse("membership_role_update", kwargs={"slug": group.slug, "pk": membership.pk}),
+            {f"membership-{membership.pk}-role": Membership.Role.WRITER.value},
+        )
+
+        self.assertFalse(GroupNotification.objects.exists())
+
     def test_non_owner_cannot_update_member_role(self):
         editor = FocusUser.objects.create(display_name="Editor")
         writer = FocusUser.objects.create(display_name="Writer")
@@ -2990,8 +3094,10 @@ class MemberManagementFlowTests(TestCase):
     def test_owner_can_remove_member(self):
         owner = FocusUser.objects.create(display_name="Owner")
         member = FocusUser.objects.create(display_name="Editor")
+        other_owner = FocusUser.objects.create(display_name="Other Owner")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
         Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_owner, group=group, role=Membership.Role.OWNER)
         membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
         self.client.force_login(owner)
 
@@ -2999,6 +3105,10 @@ class MemberManagementFlowTests(TestCase):
 
         self.assertRedirects(response, reverse("group_members", kwargs={"slug": group.slug}))
         self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
+        notification = GroupNotification.objects.get(recipient=other_owner)
+        self.assertEqual(notification.kind, GroupNotification.Kind.MEMBER_REMOVED)
+        self.assertEqual(notification.message, "Owner removed Editor from Studio.")
+        self.assertFalse(GroupNotification.objects.filter(recipient=member).exists())
 
     def test_removed_member_loses_group_access(self):
         owner = FocusUser.objects.create(display_name="Owner")
@@ -3036,6 +3146,9 @@ class MemberManagementFlowTests(TestCase):
 
         self.assertRedirects(response, reverse("dashboard"))
         self.assertFalse(Membership.objects.filter(pk=membership.pk).exists())
+        notification = GroupNotification.objects.get(recipient=owner)
+        self.assertEqual(notification.kind, GroupNotification.Kind.MEMBER_LEFT)
+        self.assertEqual(notification.message, "Editor left Studio.")
 
     def test_owner_can_leave_group_when_another_owner_remains(self):
         owner = FocusUser.objects.create(display_name="Owner")

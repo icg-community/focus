@@ -5,6 +5,7 @@ from .models import (
     AuthIdentity,
     FocusUser,
     GroupInvitation,
+    GroupNotification,
     Membership,
     ProductionGroup,
     ProjectNote,
@@ -41,3 +42,4 @@ admin.site.register(ProjectNote)
 admin.site.register(ProjectNotification)
 admin.site.register(ProjectResource)
 admin.site.register(GroupInvitation)
+admin.site.register(GroupNotification)

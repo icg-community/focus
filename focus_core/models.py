@@ -262,6 +262,40 @@ class ProjectNotification(models.Model):
         return f"{self.get_kind_display()} for {self.recipient.public_name} ({status})"
 
 
+class GroupNotification(models.Model):
+    class Kind(models.TextChoices):
+        INVITE_CREATED = "INVITE_CREATED", "Invite created"
+        INVITE_REVOKED = "INVITE_REVOKED", "Invite revoked"
+        INVITE_ACCEPTED = "INVITE_ACCEPTED", "Invite accepted"
+        MEMBER_ROLE = "MEMBER_ROLE", "Member role changed"
+        MEMBER_REMOVED = "MEMBER_REMOVED", "Member removed"
+        MEMBER_LEFT = "MEMBER_LEFT", "Member left"
+
+    recipient = models.ForeignKey(FocusUser, on_delete=models.CASCADE, related_name="group_notifications")
+    actor = models.ForeignKey(
+        FocusUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sent_group_notifications",
+    )
+    group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="group_notifications")
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    message = models.CharField(max_length=255)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "read_at", "-created_at"]),
+        ]
+
+    def __str__(self):
+        status = "read" if self.read_at else "unread"
+        return f"{self.get_kind_display()} for {self.recipient.public_name} ({status})"
+
+
 class GroupInvitation(models.Model):
     group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="invitations")
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

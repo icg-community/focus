@@ -28,7 +28,7 @@ from webauthn.helpers.structs import (
 )
 
 from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectResourceForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, GroupInvitation, GroupNotification, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -147,6 +147,36 @@ def notify_project_activity(project, actor, kind, message):
                 actor=actor,
                 group=project.group,
                 project=project,
+                kind=kind,
+                message=message,
+            )
+            for recipient_id in recipient_ids
+        ]
+    )
+
+
+def group_notification_recipient_ids(group, actor, include_user_ids=()):
+    recipient_ids = set(include_user_ids)
+    recipient_ids.update(
+        Membership.objects.filter(
+            group=group,
+            role__in=[Membership.Role.OWNER, Membership.Role.ADMIN],
+        ).values_list("user_id", flat=True)
+    )
+
+    if actor and actor.pk:
+        recipient_ids.discard(actor.pk)
+    return recipient_ids
+
+
+def notify_group_activity(group, actor, kind, message, include_user_ids=()):
+    recipient_ids = group_notification_recipient_ids(group, actor, include_user_ids)
+    GroupNotification.objects.bulk_create(
+        [
+            GroupNotification(
+                recipient_id=recipient_id,
+                actor=actor,
+                group=group,
                 kind=kind,
                 message=message,
             )
@@ -498,15 +528,45 @@ class ProjectNotificationListView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        notifications = ProjectNotification.objects.filter(recipient=self.request.user).select_related("actor", "group", "project")
-        context["notifications"] = notifications[:50]
-        context["unread_count"] = notifications.filter(read_at__isnull=True).count()
+        project_notifications = ProjectNotification.objects.filter(recipient=self.request.user).select_related("actor", "group", "project")
+        group_notifications = GroupNotification.objects.filter(recipient=self.request.user).select_related("actor", "group")
+        notification_rows = [
+            {
+                "message": notification.message,
+                "group": notification.group,
+                "kind_label": notification.get_kind_display(),
+                "created_at": notification.created_at,
+                "read_at": notification.read_at,
+                "url": reverse("project_detail", kwargs={"group_slug": notification.group.slug, "pk": notification.project.pk}),
+                "link_text": f"Open {notification.project.title} from notification",
+            }
+            for notification in project_notifications[:50]
+        ]
+        notification_rows.extend(
+            {
+                "message": notification.message,
+                "group": notification.group,
+                "kind_label": notification.get_kind_display(),
+                "created_at": notification.created_at,
+                "read_at": notification.read_at,
+                "url": reverse("group_detail", kwargs={"slug": notification.group.slug}),
+                "link_text": f"Open {notification.group.name} from notification",
+            }
+            for notification in group_notifications[:50]
+        )
+        context["notifications"] = sorted(notification_rows, key=lambda notification: notification["created_at"], reverse=True)[:50]
+        context["unread_count"] = (
+            project_notifications.filter(read_at__isnull=True).count()
+            + group_notifications.filter(read_at__isnull=True).count()
+        )
         return context
 
 
 class ProjectNotificationMarkReadView(LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
-        updated = ProjectNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
+        read_at = timezone.now()
+        updated = ProjectNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=read_at)
+        updated += GroupNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=read_at)
         if updated:
             messages.success(request, "Marked all notifications as read.")
         else:
@@ -844,6 +904,12 @@ class GroupInvitationView(LoginRequiredMixin, FormView):
         invitation = form.save(commit=False)
         invitation.group = self.group
         invitation.save()
+        notify_group_activity(
+            self.group,
+            self.request.user,
+            GroupNotification.Kind.INVITE_CREATED,
+            f"{self.request.user.public_name} created an invite link for {invitation.get_role_to_assign_display()} in {self.group.name}.",
+        )
         messages.success(self.request, "Invite link created.")
         return redirect("group_invitations", slug=self.group.slug)
 
@@ -881,6 +947,12 @@ class GroupInvitationRevokeView(LoginRequiredMixin, View):
         else:
             invitation.revoked_at = timezone.now()
             invitation.save(update_fields=["revoked_at"])
+            notify_group_activity(
+                self.group,
+                request.user,
+                GroupNotification.Kind.INVITE_REVOKED,
+                f"{request.user.public_name} revoked an invite link for {invitation.get_role_to_assign_display()} in {self.group.name}.",
+            )
             messages.success(request, "Invite link revoked.")
         return redirect("group_invitations", slug=self.group.slug)
 
@@ -974,6 +1046,7 @@ class MembershipRoleUpdateView(LoginRequiredMixin, View):
             raise PermissionDenied("Only group owners can update member roles.")
 
         membership = get_object_or_404(Membership, pk=kwargs["pk"], group=group)
+        previous_role = membership.role
         form = MembershipRoleForm(
             request.POST,
             instance=membership,
@@ -981,6 +1054,14 @@ class MembershipRoleUpdateView(LoginRequiredMixin, View):
         )
         if form.is_valid():
             updated_membership = form.save()
+            if previous_role != updated_membership.role:
+                notify_group_activity(
+                    group,
+                    request.user,
+                    GroupNotification.Kind.MEMBER_ROLE,
+                    f"{request.user.public_name} changed {updated_membership.user.public_name}'s role in {group.name} to {updated_membership.get_role_display()}.",
+                    include_user_ids=[updated_membership.user_id],
+                )
             messages.success(request, f"Updated {updated_membership.user.public_name}'s role.")
         else:
             messages.error(request, " ".join(error for errors in form.errors.values() for error in errors))
@@ -1003,6 +1084,12 @@ class MembershipRemoveView(LoginRequiredMixin, View):
             messages.error(request, " ".join(error.messages))
             return redirect("group_members", slug=group.slug)
 
+        notify_group_activity(
+            group,
+            request.user,
+            GroupNotification.Kind.MEMBER_REMOVED,
+            f"{request.user.public_name} removed {removed_user.public_name} from {group.name}.",
+        )
         messages.success(request, f"Removed {removed_user.public_name} from {group.name}.")
         if removed_user == request.user:
             return redirect("dashboard")
@@ -1019,6 +1106,12 @@ class MembershipLeaveView(LoginRequiredMixin, View):
             messages.error(request, " ".join(error.messages))
             return redirect("group_members", slug=group.slug)
 
+        notify_group_activity(
+            group,
+            request.user,
+            GroupNotification.Kind.MEMBER_LEFT,
+            f"{request.user.public_name} left {group.name}.",
+        )
         messages.success(request, f"You left {group.name}.")
         return redirect("dashboard")
 
@@ -1047,13 +1140,19 @@ class InvitationAcceptView(TemplateView):
         if self.invitation.is_used or self.invitation.revoked_at:
             return self.get(request, *args, **kwargs)
 
-        Membership.objects.create(
+        membership = Membership.objects.create(
             user=request.user,
             group=self.invitation.group,
             role=self.invitation.role_to_assign,
         )
         self.invitation.is_used = True
         self.invitation.save(update_fields=["is_used"])
+        notify_group_activity(
+            self.invitation.group,
+            request.user,
+            GroupNotification.Kind.INVITE_ACCEPTED,
+            f"{request.user.public_name} joined {self.invitation.group.name} as {membership.get_role_display()}.",
+        )
         messages.success(request, f"You joined {self.invitation.group.name}.")
         return redirect("group_detail", slug=self.invitation.group.slug)
 

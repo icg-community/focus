@@ -28,13 +28,11 @@
         {% for notification in notifications %}
             <li class="activity-item{% if not notification.read_at %} notification-unread{% endif %}">
                 <h2>
-                    <a href="{% url 'project_detail' notification.group.slug notification.project.pk %}">
-                        Open {{ notification.project.title }} from notification
-                    </a>
+                    <a href="{{ notification.url }}">{{ notification.link_text }}</a>
                 </h2>
                 <p>{{ notification.message }}</p>
                 <p class="field-help">
-                    {{ notification.group.name }}. {{ notification.get_kind_display }}. {{ notification.created_at|date:"M j, Y, g:i a" }}.
+                    {{ notification.group.name }}. {{ notification.kind_label }}. {{ notification.created_at|date:"M j, Y, g:i a" }}.
                     {% if notification.read_at %}Read.{% else %}Unread.{% endif %}
                 </p>
             </li>
@@ -43,7 +41,7 @@
 {% else %}
     <div class="empty-state">
         <h2>No notifications yet</h2>
-        <p>Project updates for work you create, manage, or are assigned to will appear here.</p>
+        <p>Project and group updates for work you create, manage, or are assigned to will appear here.</p>
     </div>
 {% endif %}
 {% endblock %}

@@ -77,6 +77,12 @@ The project is in active development. The current app is a Django application wi
 - Latest-note links go directly to the project notes section.
 - Dashboard recent activity shows the latest project note or status update from each project in the user's groups.
 
+### Notifications
+
+- In-app notifications for relevant project status changes, notes, resource changes, archive, and restore actions.
+- Notification inbox with unread state and a mark-all-read action.
+- Notification recipients are scoped to project creators, assigned collaborators, and group owners/admins.
+
 ### Accessibility Work So Far
 
 - Semantic Django templates with headings, landmarks, table captions, and scoped table headers.
@@ -92,7 +98,7 @@ The following areas are not complete yet:
 
 - Production-ready authentication provider integrations beyond the local development provider.
 - More complete project lifecycle controls, such as richer export formats and retention options.
-- More complete notifications for project changes, notes, invites, and membership changes.
+- More complete notifications for invites and membership changes.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
 - More detailed per-assignment permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.

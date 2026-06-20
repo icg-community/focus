@@ -228,6 +228,40 @@ class ProjectResource(models.Model):
         return f"{self.title} for {self.project.title}"
 
 
+class ProjectNotification(models.Model):
+    class Kind(models.TextChoices):
+        STATUS = "STATUS", "Status update"
+        NOTE = "NOTE", "Project note"
+        RESOURCE = "RESOURCE", "Project resource"
+        ARCHIVE = "ARCHIVE", "Project archived"
+        RESTORE = "RESTORE", "Project restored"
+
+    recipient = models.ForeignKey(FocusUser, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(
+        FocusUser,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="sent_project_notifications",
+    )
+    group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="notifications")
+    project = models.ForeignKey(VideoProject, on_delete=models.CASCADE, related_name="notifications")
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    message = models.CharField(max_length=255)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["recipient", "read_at", "-created_at"]),
+        ]
+
+    def __str__(self):
+        status = "read" if self.read_at else "unread"
+        return f"{self.get_kind_display()} for {self.recipient.public_name} ({status})"
+
+
 class GroupInvitation(models.Model):
     group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="invitations")
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

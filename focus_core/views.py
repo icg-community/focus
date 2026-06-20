@@ -28,7 +28,7 @@ from webauthn.helpers.structs import (
 )
 
 from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectResourceForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -117,6 +117,42 @@ def project_permission_context(user, project):
         "can_archive_project": user_can_archive_project(user, project),
         "can_delete_project": user_can_delete_project(user, project),
     }
+
+
+def project_notification_recipient_ids(project, actor):
+    recipient_ids = set()
+    if project.created_by_id:
+        recipient_ids.add(project.created_by_id)
+
+    recipient_ids.update(project.assigned_editors.values_list("pk", flat=True))
+    recipient_ids.update(project.assigned_writers.values_list("pk", flat=True))
+    recipient_ids.update(
+        Membership.objects.filter(
+            group=project.group,
+            role__in=[Membership.Role.OWNER, Membership.Role.ADMIN],
+        ).values_list("user_id", flat=True)
+    )
+
+    if actor and actor.pk:
+        recipient_ids.discard(actor.pk)
+    return recipient_ids
+
+
+def notify_project_activity(project, actor, kind, message):
+    recipient_ids = project_notification_recipient_ids(project, actor)
+    ProjectNotification.objects.bulk_create(
+        [
+            ProjectNotification(
+                recipient_id=recipient_id,
+                actor=actor,
+                group=project.group,
+                project=project,
+                kind=kind,
+                message=message,
+            )
+            for recipient_id in recipient_ids
+        ]
+    )
 
 
 def export_date(value):
@@ -455,6 +491,27 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                 break
         context["recent_activity"] = recent_activity
         return context
+
+
+class ProjectNotificationListView(LoginRequiredMixin, TemplateView):
+    template_name = "focus_core/notifications.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        notifications = ProjectNotification.objects.filter(recipient=self.request.user).select_related("actor", "group", "project")
+        context["notifications"] = notifications[:50]
+        context["unread_count"] = notifications.filter(read_at__isnull=True).count()
+        return context
+
+
+class ProjectNotificationMarkReadView(LoginRequiredMixin, View):
+    def post(self, request, *args, **kwargs):
+        updated = ProjectNotification.objects.filter(recipient=request.user, read_at__isnull=True).update(read_at=timezone.now())
+        if updated:
+            messages.success(request, "Marked all notifications as read.")
+        else:
+            messages.info(request, "There were no unread notifications.")
+        return redirect("notifications")
 
 
 class ProfileView(LoginRequiredMixin, UpdateView):
@@ -1115,6 +1172,12 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
             note.project = project
             note.author = request.user
             note.save()
+            notify_project_activity(
+                project,
+                request.user,
+                ProjectNotification.Kind.NOTE,
+                f"{request.user.public_name} added a note to {project.title}.",
+            )
             messages.success(request, "Project note added.")
             return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-notes")
 
@@ -1159,6 +1222,12 @@ class ProjectResourceCreateView(LoginRequiredMixin, View):
                 author=request.user,
                 body=f"Resource added: {resource.title} ({resource.get_kind_display()}).",
             )
+            notify_project_activity(
+                project,
+                request.user,
+                ProjectNotification.Kind.RESOURCE,
+                f"{request.user.public_name} added {resource.title} to {project.title}.",
+            )
             messages.success(request, f"Added {resource.title} to {project.title}.")
             return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-resources")
 
@@ -1195,6 +1264,12 @@ class ProjectResourceRemoveView(LoginRequiredMixin, View):
         title = resource.title
         resource.delete()
         ProjectNote.objects.create(project=project, author=request.user, body=f"Resource removed: {title}.")
+        notify_project_activity(
+            project,
+            request.user,
+            ProjectNotification.Kind.RESOURCE,
+            f"{request.user.public_name} removed {title} from {project.title}.",
+        )
         messages.success(request, f"Removed {title} from {project.title}.")
         return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-resources")
 
@@ -1220,6 +1295,12 @@ class ProjectArchiveView(LoginRequiredMixin, View):
             project.archived_at = timezone.now()
             project.save(update_fields=["archived_at", "updated_at"])
             ProjectNote.objects.create(project=project, author=request.user, body="Project archived.")
+            notify_project_activity(
+                project,
+                request.user,
+                ProjectNotification.Kind.ARCHIVE,
+                f"{request.user.public_name} archived {project.title}.",
+            )
             messages.success(request, f"Archived {project.title}.")
         return redirect("project_detail", group_slug=project.group.slug, pk=project.pk)
 
@@ -1243,6 +1324,12 @@ class ProjectRestoreView(LoginRequiredMixin, View):
             project.archived_at = None
             project.save(update_fields=["archived_at", "updated_at"])
             ProjectNote.objects.create(project=project, author=request.user, body="Project restored.")
+            notify_project_activity(
+                project,
+                request.user,
+                ProjectNotification.Kind.RESTORE,
+                f"{request.user.public_name} restored {project.title}.",
+            )
             messages.success(request, f"Restored {project.title}.")
         else:
             messages.info(request, f"{project.title} is already active.")
@@ -1318,6 +1405,12 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
                     f"{dict(VideoProject.Status.choices)[previous_status]} "
                     f"to {self.object.get_status_display()}."
                 ),
+            )
+            notify_project_activity(
+                self.object,
+                self.request.user,
+                ProjectNotification.Kind.STATUS,
+                f"{self.request.user.public_name} changed {self.object.title}'s status to {self.object.get_status_display()}.",
             )
         messages.success(self.request, f"Updated {self.object.title}'s status.")
         return response

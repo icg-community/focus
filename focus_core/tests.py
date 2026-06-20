@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 class FocusUserTests(TestCase):
@@ -2263,6 +2263,106 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(note.author, producer)
         self.assertEqual(note.body, "Status changed from Scripting to In Internal Review.")
 
+    def test_status_update_notifies_assigned_collaborator_not_actor(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+            created_by=producer,
+        )
+        project.assigned_editors.add(editor)
+        self.client.force_login(producer)
+
+        self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        notification = ProjectNotification.objects.get(recipient=editor)
+        self.assertEqual(notification.actor, producer)
+        self.assertEqual(notification.group, group)
+        self.assertEqual(notification.project, project)
+        self.assertEqual(notification.kind, ProjectNotification.Kind.STATUS)
+        self.assertEqual(notification.message, "Producer changed Launch Video's status to In Internal Review.")
+        self.assertFalse(ProjectNotification.objects.filter(recipient=producer).exists())
+
+    def test_project_note_notifies_project_creator_not_actor(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=creator)
+        project.assigned_editors.add(editor)
+        self.client.force_login(editor)
+
+        self.client.post(
+            reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"body": "Ready for review."},
+        )
+
+        notification = ProjectNotification.objects.get(recipient=creator)
+        self.assertEqual(notification.kind, ProjectNotification.Kind.NOTE)
+        self.assertEqual(notification.message, "Editor added a note to Launch Video.")
+        self.assertFalse(ProjectNotification.objects.filter(recipient=editor).exists())
+
+    def test_resource_and_archive_actions_create_project_notifications(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        project.assigned_editors.add(editor)
+        self.client.force_login(owner)
+
+        self.client.post(
+            reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "kind": ProjectResource.Kind.REVIEW,
+                "title": "Review cut",
+                "url": "https://example.com/review",
+            },
+        )
+        self.client.post(reverse("project_archive", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.client.post(reverse("project_restore", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        notifications = list(ProjectNotification.objects.filter(recipient=editor).order_by("created_at"))
+        self.assertEqual([notification.kind for notification in notifications], [
+            ProjectNotification.Kind.RESOURCE,
+            ProjectNotification.Kind.ARCHIVE,
+            ProjectNotification.Kind.RESTORE,
+        ])
+        self.assertEqual(notifications[0].message, "Owner added Review cut to Launch Video.")
+        self.assertEqual(notifications[1].message, "Owner archived Launch Video.")
+        self.assertEqual(notifications[2].message, "Owner restored Launch Video.")
+
+    def test_project_delete_removes_related_notifications(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        ProjectNotification.objects.create(
+            recipient=editor,
+            actor=owner,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.STATUS,
+            message="Owner changed Launch Video's status to Scripting.",
+        )
+        self.client.force_login(owner)
+
+        self.client.post(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertFalse(ProjectNotification.objects.filter(recipient=editor).exists())
+
     def test_same_status_update_does_not_create_project_note(self):
         producer = FocusUser.objects.create(display_name="Producer")
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
@@ -2362,6 +2462,69 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, 'aria-invalid="true"')
         self.assertContains(response, 'id="title-error"')
+
+    def test_notifications_page_shows_current_users_notifications(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        other_user = FocusUser.objects.create(display_name="Other Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        other_group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_user, group=other_group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        other_project = VideoProject.objects.create(group=other_group, title="Private Video")
+        ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Launch Video.",
+        )
+        ProjectNotification.objects.create(
+            recipient=other_user,
+            actor=actor,
+            group=other_group,
+            project=other_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Private Video.",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("notifications"))
+
+        self.assertContains(response, "Notifications (1 unread)")
+        self.assertContains(response, "Editor added a note to Launch Video.")
+        self.assertContains(response, "Open Launch Video from notification")
+        self.assertContains(response, "Unread.")
+        self.assertNotContains(response, "Private Video")
+
+    def test_mark_all_notifications_as_read(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        notification = ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Launch Video.",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(reverse("notifications_mark_read"))
+
+        notification.refresh_from_db()
+        self.assertRedirects(response, reverse("notifications"))
+        self.assertIsNotNone(notification.read_at)
+
+        page_response = self.client.get(reverse("notifications"))
+        self.assertNotContains(page_response, "Notifications (1 unread)")
+        self.assertContains(page_response, "0 unread")
+        self.assertContains(page_response, "Read.")
 
 
 class InvitationFlowTests(TestCase):

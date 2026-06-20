@@ -8,6 +8,7 @@ from .models import (
     Membership,
     ProductionGroup,
     ProjectNote,
+    ProjectNotification,
     ProjectResource,
     RecoveryCode,
     VideoProject,
@@ -37,5 +38,6 @@ admin.site.register(ProductionGroup)
 admin.site.register(Membership)
 admin.site.register(VideoProject)
 admin.site.register(ProjectNote)
+admin.site.register(ProjectNotification)
 admin.site.register(ProjectResource)
 admin.site.register(GroupInvitation)

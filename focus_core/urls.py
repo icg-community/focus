@@ -12,6 +12,8 @@ urlpatterns = [
     path("passkey/sign-in/options/", views.PasskeyAuthenticationOptionsView.as_view(), name="passkey_authentication_options"),
     path("passkey/sign-in/complete/", views.PasskeyAuthenticationCompleteView.as_view(), name="passkey_authentication_complete"),
     path("profile/", views.ProfileView.as_view(), name="profile"),
+    path("notifications/", views.ProjectNotificationListView.as_view(), name="notifications"),
+    path("notifications/read/", views.ProjectNotificationMarkReadView.as_view(), name="notifications_mark_read"),
     path("account/safety/", views.AccountSafetyView.as_view(), name="account_safety"),
     path(
         "account/linked-accounts/development/new/",

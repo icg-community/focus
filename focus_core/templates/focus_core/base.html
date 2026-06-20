@@ -18,7 +18,7 @@
                         <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
                         <li><a href="{% url 'group_create' %}">New group</a></li>
                         <li>
-                            <a href="{% url 'notifications' %}">
+                            <a id="notification-nav-link" href="{% url 'notifications' %}">
                                 Notifications{% if unread_notification_count %} ({{ unread_notification_count }} unread){% endif %}
                             </a>
                         </li>
@@ -44,5 +44,16 @@
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+    {% if request.user.is_authenticated %}
+        <div id="notification-toast-region" class="notification-toast-region" aria-hidden="true"></div>
+        <div id="notification-announcer" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+        <script
+            src="{% static 'focus_core/notifications.js' %}?v=1"
+            defer
+            data-poll-url="{% url 'notifications_poll' %}"
+            data-initial-project-id="{{ latest_project_notification_id }}"
+            data-initial-group-id="{{ latest_group_notification_id }}"
+        ></script>
+    {% endif %}
 </body>
 </html>

@@ -82,6 +82,7 @@ The project is in active development. The current app is a Django application wi
 - In-app notifications for relevant project status changes, notes, resource changes, archive, and restore actions.
 - In-app notifications for invite creation, invite revocation, invite acceptance, role changes, member removal, and members leaving groups.
 - Notification inbox filters for all updates, unread updates, project updates, and group updates.
+- Site-wide notification polling with temporary visual popups and polite screen reader announcements for new notifications.
 - Notification inbox with unread state and a mark-all-read action.
 - Notification recipients are scoped to project creators, assigned collaborators, and group owners/admins.
 

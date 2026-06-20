@@ -185,6 +185,42 @@ def notify_group_activity(group, actor, kind, message, include_user_ids=()):
     )
 
 
+def positive_int(value):
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def unread_notifications_for(user):
+    return (
+        ProjectNotification.objects.filter(recipient=user, read_at__isnull=True).count()
+        + GroupNotification.objects.filter(recipient=user, read_at__isnull=True).count()
+    )
+
+
+def serialize_project_notification(notification):
+    return {
+        "id": notification.pk,
+        "type": "project",
+        "message": notification.message,
+        "url": reverse("project_detail", kwargs={"group_slug": notification.group.slug, "pk": notification.project.pk}),
+        "link_text": f"Open {notification.project.title} from notification",
+        "created_at": notification.created_at.isoformat(),
+    }
+
+
+def serialize_group_notification(notification):
+    return {
+        "id": notification.pk,
+        "type": "group",
+        "message": notification.message,
+        "url": reverse("group_detail", kwargs={"slug": notification.group.slug}),
+        "link_text": f"Open {notification.group.name} from notification",
+        "created_at": notification.created_at.isoformat(),
+    }
+
+
 def export_date(value):
     return timezone.localtime(value).strftime("%Y-%m-%d %H:%M")
 
@@ -624,6 +660,43 @@ class ProjectNotificationMarkReadView(LoginRequiredMixin, View):
         else:
             messages.info(request, "There were no unread notifications.")
         return redirect("notifications")
+
+
+class NotificationPollView(LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        after_project_id = positive_int(request.GET.get("after_project_id"))
+        after_group_id = positive_int(request.GET.get("after_group_id"))
+        project_notifications = list(
+            ProjectNotification.objects.filter(
+                recipient=request.user,
+                pk__gt=after_project_id,
+            )
+            .select_related("group", "project")
+            .order_by("pk")[:10]
+        )
+        group_notifications = list(
+            GroupNotification.objects.filter(
+                recipient=request.user,
+                pk__gt=after_group_id,
+            )
+            .select_related("group")
+            .order_by("pk")[:10]
+        )
+        notifications = [
+            *[serialize_project_notification(notification) for notification in project_notifications],
+            *[serialize_group_notification(notification) for notification in group_notifications],
+        ]
+        notifications.sort(key=lambda notification: notification["created_at"])
+        latest_project_id = project_notifications[-1].pk if project_notifications else after_project_id
+        latest_group_id = group_notifications[-1].pk if group_notifications else after_group_id
+        return JsonResponse(
+            {
+                "notifications": notifications,
+                "unread_count": unread_notifications_for(request.user),
+                "latest_project_id": latest_project_id,
+                "latest_group_id": latest_group_id,
+            }
+        )
 
 
 class ProfileView(LoginRequiredMixin, UpdateView):

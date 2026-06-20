@@ -2508,6 +2508,95 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Unread.")
         self.assertNotContains(response, "Private Video")
 
+    def test_authenticated_pages_include_notification_live_regions(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        notification = ProjectNotification.objects.create(
+            recipient=user,
+            actor=user,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Producer added a note to Launch Video.",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, 'id="notification-toast-region"')
+        self.assertContains(response, 'id="notification-announcer"')
+        self.assertContains(response, 'role="status"')
+        self.assertContains(response, 'aria-live="polite"')
+        self.assertContains(response, reverse("notifications_poll"))
+        self.assertContains(response, f'data-initial-project-id="{notification.pk}"')
+
+    def test_notification_poll_returns_only_new_current_user_notifications(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        other_user = FocusUser.objects.create(display_name="Other Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        other_group = ProductionGroup.objects.create(name="Other Studio", slug="other-studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=other_user, group=other_group, role=Membership.Role.OWNER)
+        old_project = VideoProject.objects.create(group=group, title="Old Launch Video")
+        new_project = VideoProject.objects.create(group=group, title="New Launch Video")
+        other_project = VideoProject.objects.create(group=other_group, title="Private Video")
+        old_notification = ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=old_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Old Launch Video.",
+        )
+        new_notification = ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=new_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to New Launch Video.",
+        )
+        ProjectNotification.objects.create(
+            recipient=other_user,
+            actor=actor,
+            group=other_group,
+            project=other_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Private Video.",
+        )
+        group_notification = GroupNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            kind=GroupNotification.Kind.INVITE_ACCEPTED,
+            message="Editor joined Studio as Video Editor.",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(
+            reverse("notifications_poll"),
+            {"after_project_id": old_notification.pk, "after_group_id": 0},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["unread_count"], 3)
+        self.assertEqual(payload["latest_project_id"], new_notification.pk)
+        self.assertEqual(payload["latest_group_id"], group_notification.pk)
+        self.assertEqual(
+            [notification["message"] for notification in payload["notifications"]],
+            [
+                "Editor added a note to New Launch Video.",
+                "Editor joined Studio as Video Editor.",
+            ],
+        )
+        self.assertEqual(payload["notifications"][0]["type"], "project")
+        self.assertEqual(payload["notifications"][1]["type"], "group")
+        self.assertNotIn("Private Video", json.dumps(payload))
+
     def test_notifications_page_filters_unread_notifications(self):
         user = FocusUser.objects.create(display_name="Producer")
         actor = FocusUser.objects.create(display_name="Editor")

@@ -1,0 +1,51 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Privacy{% endblock %}
+
+{% block content %}
+<article class="content-narrow trust-page">
+    <p class="eyebrow">Plain-language privacy notes</p>
+    <h1>Privacy</h1>
+    <p>
+        FOCUS is designed to help people coordinate production work without asking for
+        more identity information than the app needs. This page describes the intended
+        privacy model for the project while it is still in development.
+    </p>
+
+    <h2>Information FOCUS avoids collecting</h2>
+    <p>
+        FOCUS does not require a legal name, email address, phone number, postal address,
+        or password. A person can use a display name and profile bio, but those fields
+        are optional and should not include private personal details.
+    </p>
+
+    <h2>Information stored for the app to work</h2>
+    <p>
+        FOCUS stores account records, linked sign-in identities, passkey records, backup
+        key hashes, group memberships, project details, resource links, project notes,
+        invitation records, and notifications. This information is used to show the right
+        groups, projects, access controls, and updates to the right people.
+    </p>
+
+    <h2>Project and group visibility</h2>
+    <p>
+        Production groups are separate workspaces. Group members can see group projects
+        and member information that belongs to their shared group. Removed members and
+        people outside the group should not be able to view group content.
+    </p>
+
+    <h2>Exports and deletion</h2>
+    <p>
+        Project exports are generated when a group member downloads them. Project deletion
+        removes the project and its related project notes, resource records, and project
+        notifications. Archive and restore keep project history while hiding inactive work
+        from active project lists.
+    </p>
+
+    <h2>Before production</h2>
+    <p>
+        Before FOCUS is used in production, it still needs production settings, provider
+        integrations, deployment documentation, backups, and a final privacy review.
+    </p>
+</article>
+{% endblock %}

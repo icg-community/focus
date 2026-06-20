@@ -98,8 +98,47 @@ a:hover {
     padding: 2rem 0;
 }
 
+.site-footer {
+    margin-top: 2rem;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.site-footer__inner {
+    width: min(72rem, calc(100% - 2rem));
+    margin: 0 auto;
+    padding: 1.25rem 0;
+}
+
+.site-footer__inner p {
+    margin: 0 0 0.75rem;
+}
+
+.footer-link-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
 .content-narrow {
     max-width: 42rem;
+}
+
+.trust-page {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.trust-page h2 {
+    margin-top: 1rem;
+}
+
+.trust-page p,
+.trust-page ul {
+    margin-top: 0;
 }
 
 .page-heading {

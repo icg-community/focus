@@ -6,6 +6,10 @@ from . import views
 
 urlpatterns = [
     path("", views.DashboardView.as_view(), name="dashboard"),
+    path("about/", views.AboutView.as_view(), name="about"),
+    path("privacy/", views.PrivacyView.as_view(), name="privacy"),
+    path("accessibility/", views.AccessibilityView.as_view(), name="accessibility"),
+    path("status/", views.StatusView.as_view(), name="status"),
     path("dev/sign-in/", views.DevSignInView.as_view(), name="dev_sign_in"),
     path("backup-key/sign-in/", views.BackupKeySignInView.as_view(), name="backup_key_sign_in"),
     path("passkey/sign-in/", views.PasskeySignInView.as_view(), name="passkey_sign_in"),

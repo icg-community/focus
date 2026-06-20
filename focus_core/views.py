@@ -42,6 +42,22 @@ PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
 PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY = "passkey_authentication_next"
 
 
+class AboutView(TemplateView):
+    template_name = "focus_core/about.html"
+
+
+class PrivacyView(TemplateView):
+    template_name = "focus_core/privacy.html"
+
+
+class AccessibilityView(TemplateView):
+    template_name = "focus_core/accessibility.html"
+
+
+class StatusView(TemplateView):
+    template_name = "focus_core/status.html"
+
+
 def unique_group_slug(name):
     base_slug = slugify(name) or "group"
     slug = base_slug

@@ -95,6 +95,13 @@ The project is in active development. The current app is a Django application wi
 - Descriptive link and button text that names the affected project, member, invite, or group.
 - Plain-language messages for recovery, passkeys, invitations, and owner-protection rules.
 
+### Public Trust Pages
+
+- About page describing FOCUS and its current development state.
+- Plain-language privacy page describing the intended pseudonymous data model.
+- Accessibility page describing current accessibility work and testing still needed.
+- Status and changelog page summarizing recent implementation work and production-readiness gaps.
+
 ## Planned Functionality
 
 The following areas are not complete yet:

@@ -1,0 +1,41 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Accessibility{% endblock %}
+
+{% block content %}
+<article class="content-narrow trust-page">
+    <p class="eyebrow">Accessibility commitment</p>
+    <h1>Accessibility</h1>
+    <p>
+        FOCUS is being built for blind and sighted creators. The goal is WCAG 2.2 AA
+        conformance, with special attention to keyboard use, screen reader support,
+        readable copy, and predictable production workflows.
+    </p>
+
+    <h2>What is already built into the interface</h2>
+    <ul>
+        <li>Semantic headings, landmarks, tables, and native controls.</li>
+        <li>A skip link that moves keyboard focus to the main content.</li>
+        <li>Visible focus indicators for keyboard users.</li>
+        <li>Form labels, help text, error summaries, and invalid field states.</li>
+        <li>Descriptive link and button text that names the affected item.</li>
+        <li>Live regions for sign-in status, copy actions, messages, and new notifications.</li>
+    </ul>
+
+    <h2>Testing still needed before production</h2>
+    <p>
+        The project still needs broader manual testing with NVDA, JAWS, Narrator,
+        VoiceOver, keyboard-only navigation, browser zoom, and high contrast or forced
+        colors. Automated accessibility checks should also be added to continuous
+        integration before launch.
+    </p>
+
+    <h2>Known scope</h2>
+    <p>
+        Public trust pages, sign-in flows, account safety pages, group pages, member
+        pages, project pages, notifications, and destructive confirmation pages should
+        all be part of the production accessibility review. Machine endpoints, downloads,
+        and development-only routes should be tracked separately from user-facing pages.
+    </p>
+</article>
+{% endblock %}

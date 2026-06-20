@@ -115,6 +115,38 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("dev_sign_in"), response["Location"])
 
+    def test_public_trust_pages_are_available_without_sign_in(self):
+        expected_content = {
+            "about": "FOCUS is a privacy-first production management hub",
+            "privacy": "FOCUS does not require a legal name",
+            "accessibility": "WCAG 2.2 AA",
+            "status": "The app is not production-ready yet.",
+        }
+
+        for route_name, page_text in expected_content.items():
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, page_text)
+                self.assertContains(response, 'id="main-content"')
+                self.assertContains(response, "Skip to main content")
+                self.assertContains(response, reverse("about"))
+                self.assertContains(response, reverse("privacy"))
+                self.assertContains(response, reverse("accessibility"))
+                self.assertContains(response, reverse("status"))
+
+    def test_public_trust_pages_do_not_load_authenticated_notification_script(self):
+        response = self.client.get(reverse("about"))
+
+        self.assertNotContains(response, "notifications.js")
+        self.assertNotContains(response, "notification-announcer")
+
+    def test_signed_out_brand_points_to_public_about_page(self):
+        response = self.client.get(reverse("privacy"))
+
+        self.assertContains(response, f'<a class="brand" href="{reverse("about")}">FOCUS</a>')
+
     def test_protected_page_redirect_includes_original_destination(self):
         response = self.client.get(reverse("profile"))
 

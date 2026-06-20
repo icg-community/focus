@@ -1,0 +1,39 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Status and Changelog{% endblock %}
+
+{% block content %}
+<article class="content-narrow trust-page">
+    <p class="eyebrow">Project status</p>
+    <h1>Status and changelog</h1>
+    <p>
+        FOCUS is in active development. This page gives people a plain-language view of
+        what is working now and what still needs to happen before production deployment.
+    </p>
+
+    <h2>Current status</h2>
+    <p>
+        The app is not production-ready yet. Local development workflows, automated tests,
+        and core production-management features are in place, but production deployment
+        settings and external authentication provider integrations are still unfinished.
+    </p>
+
+    <h2>Recent implementation work</h2>
+    <ul>
+        <li>Passkey sign-in, backup keys, and account safety guardrails.</li>
+        <li>Profiles with bio, availability, and project visibility controls.</li>
+        <li>Production groups with invitations, role management, member removal, and leave-group safeguards.</li>
+        <li>Projects with assignment tracking, status updates, resources, notes, archive, restore, export, and deletion.</li>
+        <li>Project and group notifications, notification filters, and site-wide notification announcements.</li>
+    </ul>
+
+    <h2>Production readiness still needed</h2>
+    <ul>
+        <li>Provider integrations for real sign-in anchors beyond local development.</li>
+        <li>Environment-based secrets, allowed hosts, secure cookies, and deployment documentation.</li>
+        <li>Backups, retention decisions, and operational recovery notes.</li>
+        <li>Automated accessibility checks and broader manual assistive technology testing.</li>
+        <li>Contributor workflow notes for issue triage, pull requests, reviews, and releases.</li>
+    </ul>
+</article>
+{% endblock %}

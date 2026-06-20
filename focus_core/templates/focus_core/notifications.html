@@ -23,6 +23,18 @@
     {% endif %}
 </div>
 
+<nav class="filter-nav" aria-label="Notification filters">
+    <ul class="filter-list">
+        {% for filter_link in notification_filter_links %}
+            <li>
+                <a class="filter-link" href="{{ filter_link.url }}"{% if filter_link.is_current %} aria-current="page"{% endif %}>
+                    {{ filter_link.label }} ({{ filter_link.count }})
+                </a>
+            </li>
+        {% endfor %}
+    </ul>
+</nav>
+
 {% if notifications %}
     <ol class="activity-list">
         {% for notification in notifications %}
@@ -40,8 +52,8 @@
     </ol>
 {% else %}
     <div class="empty-state">
-        <h2>No notifications yet</h2>
-        <p>Project and group updates for work you create, manage, or are assigned to will appear here.</p>
+        <h2>{{ empty_state_heading }}</h2>
+        <p>{{ empty_state_message }}</p>
     </div>
 {% endif %}
 {% endblock %}

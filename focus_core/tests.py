@@ -2508,6 +2508,95 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Unread.")
         self.assertNotContains(response, "Private Video")
 
+    def test_notifications_page_filters_unread_notifications(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        unread_project = VideoProject.objects.create(group=group, title="Unread Launch Video")
+        read_project = VideoProject.objects.create(group=group, title="Read Launch Video")
+        ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=unread_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Unread Launch Video.",
+        )
+        ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=read_project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Read Launch Video.",
+            read_at=timezone.now(),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("notifications"), {"filter": "unread"})
+
+        self.assertContains(response, "Unread (1)")
+        self.assertContains(response, 'aria-current="page"')
+        self.assertContains(response, "Editor added a note to Unread Launch Video.")
+        self.assertNotContains(response, "Editor added a note to Read Launch Video.")
+
+    def test_notifications_page_filters_project_and_group_notifications(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Launch Video.",
+        )
+        GroupNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            kind=GroupNotification.Kind.INVITE_ACCEPTED,
+            message="Editor joined Studio as Video Editor.",
+        )
+        self.client.force_login(user)
+
+        project_response = self.client.get(reverse("notifications"), {"filter": "project"})
+        group_response = self.client.get(reverse("notifications"), {"filter": "group"})
+
+        self.assertContains(project_response, "Project updates (1)")
+        self.assertContains(project_response, "Editor added a note to Launch Video.")
+        self.assertNotContains(project_response, "Editor joined Studio as Video Editor.")
+        self.assertContains(group_response, "Group updates (1)")
+        self.assertContains(group_response, "Editor joined Studio as Video Editor.")
+        self.assertNotContains(group_response, "Editor added a note to Launch Video.")
+
+    def test_notifications_page_shows_filtered_empty_state(self):
+        user = FocusUser.objects.create(display_name="Producer")
+        actor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=user, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        ProjectNotification.objects.create(
+            recipient=user,
+            actor=actor,
+            group=group,
+            project=project,
+            kind=ProjectNotification.Kind.NOTE,
+            message="Editor added a note to Launch Video.",
+            read_at=timezone.now(),
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("notifications"), {"filter": "unread"})
+
+        self.assertContains(response, "No unread notifications")
+        self.assertContains(response, "Unread project and group updates will appear here.")
+        self.assertContains(response, "Unread (0)")
+
     def test_mark_all_notifications_as_read(self):
         user = FocusUser.objects.create(display_name="Producer")
         actor = FocusUser.objects.create(display_name="Editor")

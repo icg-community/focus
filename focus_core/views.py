@@ -525,11 +525,43 @@ class DashboardView(LoginRequiredMixin, TemplateView):
 
 class ProjectNotificationListView(LoginRequiredMixin, TemplateView):
     template_name = "focus_core/notifications.html"
+    filter_options = {
+        "all": "All updates",
+        "unread": "Unread",
+        "project": "Project updates",
+        "group": "Group updates",
+    }
+
+    def selected_filter(self):
+        requested_filter = self.request.GET.get("filter", "all")
+        if requested_filter in self.filter_options:
+            return requested_filter
+        return "all"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         project_notifications = ProjectNotification.objects.filter(recipient=self.request.user).select_related("actor", "group", "project")
         group_notifications = GroupNotification.objects.filter(recipient=self.request.user).select_related("actor", "group")
+        unread_count = (
+            project_notifications.filter(read_at__isnull=True).count()
+            + group_notifications.filter(read_at__isnull=True).count()
+        )
+        filter_counts = {
+            "all": project_notifications.count() + group_notifications.count(),
+            "unread": unread_count,
+            "project": project_notifications.count(),
+            "group": group_notifications.count(),
+        }
+        selected_filter = self.selected_filter()
+
+        if selected_filter == "unread":
+            project_notifications = project_notifications.filter(read_at__isnull=True)
+            group_notifications = group_notifications.filter(read_at__isnull=True)
+        elif selected_filter == "project":
+            group_notifications = group_notifications.none()
+        elif selected_filter == "group":
+            project_notifications = project_notifications.none()
+
         notification_rows = [
             {
                 "message": notification.message,
@@ -555,10 +587,30 @@ class ProjectNotificationListView(LoginRequiredMixin, TemplateView):
             for notification in group_notifications[:50]
         )
         context["notifications"] = sorted(notification_rows, key=lambda notification: notification["created_at"], reverse=True)[:50]
-        context["unread_count"] = (
-            project_notifications.filter(read_at__isnull=True).count()
-            + group_notifications.filter(read_at__isnull=True).count()
-        )
+        context["unread_count"] = unread_count
+        context["selected_filter"] = selected_filter
+        context["empty_state_heading"] = {
+            "all": "No notifications yet",
+            "unread": "No unread notifications",
+            "project": "No project notifications yet",
+            "group": "No group notifications yet",
+        }[selected_filter]
+        context["empty_state_message"] = {
+            "all": "Project and group updates for work you create, manage, or are assigned to will appear here.",
+            "unread": "Unread project and group updates will appear here.",
+            "project": "Project updates for work you create, manage, or are assigned to will appear here.",
+            "group": "Group membership and invite updates will appear here.",
+        }[selected_filter]
+        context["notification_filter_links"] = [
+            {
+                "key": key,
+                "label": label,
+                "count": filter_counts[key],
+                "url": reverse("notifications") if key == "all" else f"{reverse('notifications')}?filter={key}",
+                "is_current": selected_filter == key,
+            }
+            for key, label in self.filter_options.items()
+        ]
         return context
 
 

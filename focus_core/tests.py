@@ -1565,9 +1565,90 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, writer.public_name)
         self.assertContains(response, reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "Update status")
+        self.assertContains(response, "Download Launch Video export (Markdown)")
+        self.assertContains(response, reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "Project notes")
         self.assertContains(response, reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "No notes have been added yet.")
+
+    def test_group_member_can_export_project_as_markdown(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            description="Opening episode",
+            status=VideoProject.Status.REVIEW,
+            asset_pipeline_url="https://example.com/assets",
+            script_url="https://example.com/script",
+            created_by=producer,
+        )
+        project.assigned_editors.add(editor)
+        project.assigned_writers.add(writer)
+        ProjectResource.objects.create(
+            project=project,
+            added_by=editor,
+            kind=ProjectResource.Kind.REVIEW,
+            title="Review cut",
+            url="https://example.com/review",
+        )
+        ProjectNote.objects.create(project=project, author=producer, body="First export note.")
+        ProjectNote.objects.create(project=project, author=editor, body="Second export note.")
+        self.client.force_login(writer)
+
+        response = self.client.get(reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/markdown; charset=utf-8")
+        self.assertEqual(response["Content-Disposition"], 'attachment; filename="launch-video-focus-export.md"')
+        self.assertIn("# Launch Video", content)
+        self.assertIn("- Group: Studio", content)
+        self.assertIn("- Status: In Internal Review", content)
+        self.assertIn("- Created by: Producer", content)
+        self.assertIn("Opening episode", content)
+        self.assertIn("- Asset folder: https://example.com/assets", content)
+        self.assertIn("- Script: https://example.com/script", content)
+        self.assertIn("- Editor", content)
+        self.assertIn("- Writer", content)
+        self.assertIn("[Review cut](https://example.com/review) - Review link, added by Editor", content)
+        self.assertIn("First export note.", content)
+        self.assertIn("Second export note.", content)
+
+    def test_project_export_uses_empty_states_when_project_has_no_optional_content(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Quiet Project")
+        self.client.force_login(producer)
+
+        response = self.client.get(reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        content = response.content.decode()
+
+        self.assertIn("No description.", content)
+        self.assertIn("- Asset folder: Not set.", content)
+        self.assertIn("- Script: Not set.", content)
+        self.assertIn("No editors assigned.", content)
+        self.assertIn("No writers assigned.", content)
+        self.assertIn("No resources added.", content)
+        self.assertIn("No notes added.", content)
+
+    def test_non_member_cannot_export_project(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.get(reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertEqual(response.status_code, 404)
 
     def test_project_detail_shows_resources_and_add_form(self):
         producer = FocusUser.objects.create(display_name="Producer")

@@ -9,7 +9,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Prefetch, Q
-from django.http import Http404, JsonResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -82,6 +82,76 @@ def project_resource_rows(user, project):
         }
         for resource in project.resources.select_related("added_by")
     ]
+
+
+def export_date(value):
+    return timezone.localtime(value).strftime("%Y-%m-%d %H:%M")
+
+
+def markdown_label(value):
+    return str(value).replace("[", "\\[").replace("]", "\\]").strip()
+
+
+def project_export_markdown(project):
+    lines = [
+        f"# {project.title}",
+        "",
+        f"Exported from FOCUS on {export_date(timezone.now())}.",
+        "",
+        "## Project summary",
+        "",
+        f"- Group: {project.group.name}",
+        f"- Status: {project.get_status_display()}",
+        f"- Archive status: {'Archived' if project.archived_at else 'Active'}",
+        f"- Last updated: {export_date(project.updated_at)}",
+        f"- Created: {export_date(project.created_at)}",
+    ]
+    if project.created_by:
+        lines.append(f"- Created by: {project.created_by.public_name}")
+
+    lines.extend(["", "## Description", ""])
+    lines.append(project.description.strip() if project.description.strip() else "No description.")
+
+    lines.extend(["", "## Project links", ""])
+    lines.append(f"- Asset folder: {project.asset_pipeline_url or 'Not set.'}")
+    lines.append(f"- Script: {project.script_url or 'Not set.'}")
+
+    lines.extend(["", "## Assignments", "", "### Editors", ""])
+    editors = list(project.assigned_editors.all())
+    lines.extend([f"- {editor.public_name}" for editor in editors] or ["No editors assigned."])
+
+    lines.extend(["", "### Writers", ""])
+    writers = list(project.assigned_writers.all())
+    lines.extend([f"- {writer.public_name}" for writer in writers] or ["No writers assigned."])
+
+    lines.extend(["", "## Resources", ""])
+    resources = list(project.resources.select_related("added_by"))
+    if resources:
+        for resource in resources:
+            added_by = f", added by {resource.added_by.public_name}" if resource.added_by else ""
+            lines.append(
+                f"- [{markdown_label(resource.title)}]({resource.url}) - "
+                f"{resource.get_kind_display()}{added_by} on {export_date(resource.created_at)}"
+            )
+    else:
+        lines.append("No resources added.")
+
+    lines.extend(["", "## Notes", ""])
+    notes = list(project.notes.select_related("author"))
+    if notes:
+        for note in notes:
+            lines.extend(
+                [
+                    f"### {export_date(note.created_at)} - {note.author.public_name}",
+                    "",
+                    note.body.strip(),
+                    "",
+                ]
+            )
+    else:
+        lines.append("No notes added.")
+
+    return "\n".join(lines).strip() + "\n"
 
 
 def generate_recovery_code():
@@ -961,6 +1031,26 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context["notes"] = self.object.notes.select_related("author")
         context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
         return context
+
+
+class ProjectExportView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            )
+            .select_related("group", "created_by")
+            .prefetch_related("assigned_editors", "assigned_writers"),
+            pk=self.kwargs["pk"],
+        )
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        filename = f"{slugify(project.title) or 'project'}-focus-export.md"
+        response = HttpResponse(project_export_markdown(project), content_type="text/markdown; charset=utf-8")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class ProjectNoteCreateView(LoginRequiredMixin, View):

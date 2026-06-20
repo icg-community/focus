@@ -53,6 +53,11 @@ urlpatterns = [
     path("groups/<slug:slug>/projects/new/", views.ProjectCreateView.as_view(), name="project_create"),
     path("groups/<slug:group_slug>/projects/<int:pk>/", views.ProjectDetailView.as_view(), name="project_detail"),
     path(
+        "groups/<slug:group_slug>/projects/<int:pk>/export/",
+        views.ProjectExportView.as_view(),
+        name="project_export",
+    ),
+    path(
         "groups/<slug:group_slug>/projects/<int:pk>/status/",
         views.ProjectStatusUpdateView.as_view(),
         name="project_status_update",

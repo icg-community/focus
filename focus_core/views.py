@@ -56,6 +56,13 @@ def user_group_membership(user, group):
     return Membership.objects.filter(user=user, group=group).first()
 
 
+def user_can_archive_project(user, project):
+    membership = user_group_membership(user, project.group)
+    if not membership:
+        return False
+    return membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN} or project.created_by_id == user.pk
+
+
 def generate_recovery_code():
     parts = [
         "".join(secrets.choice(RECOVERY_CODE_ALPHABET) for _ in range(4))
@@ -276,6 +283,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
         assigned_projects = (
             VideoProject.objects.filter(group__members__user=user)
             .filter(Q(assigned_editors=user) | Q(assigned_writers=user))
+            .filter(archived_at__isnull=True)
             .select_related("group")
             .prefetch_related(
                 "assigned_editors",
@@ -551,12 +559,15 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         all_projects = self.object.projects.all()
-        selected_status = self.request.GET.get("status", "")
+        active_projects = all_projects.filter(archived_at__isnull=True)
+        archived_projects = all_projects.filter(archived_at__isnull=False)
+        selected_archive = self.request.GET.get("archive") == "1"
+        selected_status = "" if selected_archive else self.request.GET.get("status", "")
         valid_statuses = {value for value, _label in VideoProject.Status.choices}
         if selected_status not in valid_statuses:
             selected_status = ""
 
-        projects = all_projects
+        projects = archived_projects if selected_archive else active_projects
         if selected_status:
             projects = projects.filter(status=selected_status)
 
@@ -572,22 +583,42 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
             {
                 "project": project,
                 "latest_note": project.prefetched_notes[0] if project.prefetched_notes else None,
+                "can_archive": user_can_archive_project(self.request.user, project),
             }
             for project in projects
         ]
-        context["project_total_count"] = all_projects.count()
+        active_project_count = active_projects.count()
+        archived_project_count = archived_projects.count()
+        context["project_total_count"] = archived_project_count if selected_archive else active_project_count
+        context["active_project_count"] = active_project_count
+        context["archived_project_count"] = archived_project_count
+        context["selected_archive"] = selected_archive
         context["selected_status"] = selected_status
+        context["project_scope_filters"] = [
+            {
+                "label": "Active projects",
+                "count": active_project_count,
+                "url": detail_url,
+                "is_current": not selected_archive,
+            },
+            {
+                "label": "Archived projects",
+                "count": archived_project_count,
+                "url": f"{detail_url}?archive=1",
+                "is_current": selected_archive,
+            },
+        ]
         context["status_filters"] = [
             {
                 "label": "All projects",
-                "count": all_projects.count(),
+                "count": active_project_count,
                 "url": detail_url,
                 "is_current": selected_status == "",
             },
             *[
                 {
                     "label": label,
-                    "count": all_projects.filter(status=value).count(),
+                    "count": active_projects.filter(status=value).count(),
                     "url": f"{detail_url}?status={value}",
                     "is_current": selected_status == value,
                 }
@@ -703,6 +734,7 @@ class MemberProfileView(LoginRequiredMixin, DetailView):
             assigned_projects = (
                 VideoProject.objects.filter(group=self.group)
                 .filter(Q(assigned_editors=profile_user) | Q(assigned_writers=profile_user))
+                .filter(archived_at__isnull=True)
                 .prefetch_related(
                     Prefetch(
                         "notes",
@@ -852,6 +884,7 @@ class ProjectCreateView(LoginRequiredMixin, CreateView):
 
     def form_valid(self, form):
         form.instance.group = self.group
+        form.instance.created_by = self.request.user
         return super().form_valid(form)
 
     def get_form_kwargs(self):
@@ -878,7 +911,7 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
                 group__slug=self.kwargs["group_slug"],
                 group__members__user=self.request.user,
             )
-            .select_related("group")
+            .select_related("group", "created_by")
             .prefetch_related("assigned_editors", "assigned_writers")
         )
 
@@ -888,6 +921,7 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context.setdefault("status_form", ProjectStatusForm(instance=self.object))
         context.setdefault("note_form", ProjectNoteForm())
         context["notes"] = self.object.notes.select_related("author")
+        context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
         return context
 
 
@@ -920,8 +954,59 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
             "status_form": ProjectStatusForm(instance=project),
             "note_form": form,
             "notes": project.notes.select_related("author"),
+            "can_archive_project": user_can_archive_project(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
+
+
+class ProjectArchiveView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            ).select_related("group", "created_by"),
+            pk=self.kwargs["pk"],
+        )
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        if not user_can_archive_project(request.user, project):
+            raise PermissionDenied("Only the project creator, group owners, or admins can archive projects.")
+
+        if project.archived_at:
+            messages.info(request, f"{project.title} is already archived.")
+        else:
+            project.archived_at = timezone.now()
+            project.save(update_fields=["archived_at", "updated_at"])
+            ProjectNote.objects.create(project=project, author=request.user, body="Project archived.")
+            messages.success(request, f"Archived {project.title}.")
+        return redirect("project_detail", group_slug=project.group.slug, pk=project.pk)
+
+
+class ProjectRestoreView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            ).select_related("group", "created_by"),
+            pk=self.kwargs["pk"],
+        )
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        if not user_can_archive_project(request.user, project):
+            raise PermissionDenied("Only the project creator, group owners, or admins can restore projects.")
+
+        if project.archived_at:
+            project.archived_at = None
+            project.save(update_fields=["archived_at", "updated_at"])
+            ProjectNote.objects.create(project=project, author=request.user, body="Project restored.")
+            messages.success(request, f"Restored {project.title}.")
+        else:
+            messages.info(request, f"{project.title} is already active.")
+        return redirect("project_detail", group_slug=project.group.slug, pk=project.pk)
 
 
 class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
@@ -935,7 +1020,7 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
                 group__slug=self.kwargs["group_slug"],
                 group__members__user=self.request.user,
             )
-            .select_related("group")
+            .select_related("group", "created_by")
             .prefetch_related("assigned_editors", "assigned_writers")
         )
 
@@ -961,6 +1046,7 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         context["status_form"] = context["form"]
         context["note_form"] = ProjectNoteForm()
         context["notes"] = self.object.notes.select_related("author")
+        context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
         return context
 
     def get_success_url(self):

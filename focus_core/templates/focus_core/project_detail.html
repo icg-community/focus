@@ -18,6 +18,19 @@
     </div>
     <div class="action-row">
         <a class="button" href="{% url 'project_update' group.slug object.pk %}">Edit {{ object.title }}</a>
+        {% if can_archive_project %}
+            {% if object.archived_at %}
+                <form method="post" action="{% url 'project_restore' group.slug object.pk %}" class="inline-form">
+                    {% csrf_token %}
+                    <button type="submit" class="button button--secondary">Restore {{ object.title }}</button>
+                </form>
+            {% else %}
+                <form method="post" action="{% url 'project_archive' group.slug object.pk %}" class="inline-form">
+                    {% csrf_token %}
+                    <button type="submit" class="button button--danger">Archive {{ object.title }}</button>
+                </form>
+            {% endif %}
+        {% endif %}
     </div>
 </div>
 
@@ -33,6 +46,16 @@
         <div>
             <dt>Status</dt>
             <dd>{{ object.get_status_display }}</dd>
+        </div>
+        <div>
+            <dt>Archive status</dt>
+            <dd>
+                {% if object.archived_at %}
+                    Archived on {{ object.archived_at|date:"M j, Y" }}.
+                {% else %}
+                    Active.
+                {% endif %}
+            </dd>
         </div>
         <div>
             <dt>Last updated</dt>

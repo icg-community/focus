@@ -182,6 +182,8 @@ class VideoProject(models.Model):
     script_url = models.URLField(blank=True, max_length=500)
     assigned_editors = models.ManyToManyField(FocusUser, blank=True, related_name="assigned_edits")
     assigned_writers = models.ManyToManyField(FocusUser, blank=True, related_name="assigned_scripts")
+    created_by = models.ForeignKey(FocusUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_projects")
+    archived_at = models.DateTimeField(null=True, blank=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

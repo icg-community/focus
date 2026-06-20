@@ -26,7 +26,21 @@
 
 <section>
     <h2>Projects</h2>
-    {% if project_total_count %}
+    {% if active_project_count or archived_project_count %}
+        <nav class="filter-nav" aria-label="Project archive filters">
+            <ul class="filter-list">
+                {% for filter in project_scope_filters %}
+                    <li>
+                        <a class="filter-link" href="{{ filter.url }}"{% if filter.is_current %} aria-current="page"{% endif %}>
+                            {{ filter.label }} ({{ filter.count }})
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endif %}
+
+    {% if project_total_count and not selected_archive %}
         <nav class="filter-nav" aria-label="Project status filters">
             <ul class="filter-list">
                 {% for filter in status_filters %}
@@ -43,7 +57,7 @@
     {% if project_rows %}
         <div class="table-wrap">
             <table>
-                <caption>Projects in {{ object.name }}</caption>
+                <caption>{% if selected_archive %}Archived projects in {{ object.name }}{% else %}Active projects in {{ object.name }}{% endif %}</caption>
                 <thead>
                     <tr>
                         <th scope="col">Title</th>
@@ -71,18 +85,46 @@
                                     No notes yet.
                                 {% endif %}
                             </td>
-                            <td><a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a></td>
+                            <td>
+                                <div class="table-actions">
+                                    <a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a>
+                                    {% if row.can_archive %}
+                                        {% if project.archived_at %}
+                                            <form method="post" action="{% url 'project_restore' object.slug project.pk %}" class="inline-form">
+                                                {% csrf_token %}
+                                                <button type="submit" class="button button--secondary">Restore {{ project.title }}</button>
+                                            </form>
+                                        {% else %}
+                                            <form method="post" action="{% url 'project_archive' object.slug project.pk %}" class="inline-form">
+                                                {% csrf_token %}
+                                                <button type="submit" class="button button--danger">Archive {{ project.title }}</button>
+                                            </form>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                            </td>
                         </tr>
                         {% endwith %}
                     {% endfor %}
                 </tbody>
             </table>
         </div>
-    {% elif project_total_count %}
+    {% elif selected_archive %}
+        <div class="empty-state">
+            <h3>No archived projects yet</h3>
+            <p>Archived projects will appear here when someone archives work in this group.</p>
+        </div>
+    {% elif selected_status %}
         <div class="empty-state">
             <h3>No projects match this status</h3>
             <p>Choose another status filter or return to the full project list.</p>
             <a class="button" href="{% url 'group_detail' object.slug %}">Show all projects</a>
+        </div>
+    {% elif archived_project_count %}
+        <div class="empty-state">
+            <h3>No active projects</h3>
+            <p>This group only has archived projects right now.</p>
+            <a class="button" href="{% url 'group_detail' object.slug %}?archive=1">View archived projects</a>
         </div>
     {% else %}
         <div class="empty-state">

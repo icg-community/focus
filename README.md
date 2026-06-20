@@ -61,6 +61,8 @@ The project is in active development. The current app is a Django application wi
 - Status filters on group project lists.
 - Assigned project list on the signed-in user's dashboard.
 - Assigned projects can be shown on opted-in member profiles.
+- Archive and restore projects without deleting notes, assignments, or project history.
+- Archived projects are hidden from active project and assignment lists by default.
 
 ### Project Notes
 
@@ -84,7 +86,7 @@ The project is in active development. The current app is a Django application wi
 The following areas are not complete yet:
 
 - Production-ready authentication provider integrations beyond the local development provider.
-- More complete project lifecycle controls, such as archive, restore, or delete.
+- More complete project lifecycle controls, such as project deletion or export.
 - Notification or activity feed for project changes, notes, invites, and membership changes.
 - Richer project assets and script tracking.
 - More detailed permissions for admins, editors, writers, and talent.

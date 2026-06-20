@@ -1271,6 +1271,7 @@ class ProductionFlowTests(TestCase):
         project = group.projects.get(title="Launch Video")
         self.assertRedirects(create_response, reverse("group_detail", kwargs={"slug": group.slug}))
         self.assertEqual(project.status, "SCRIPTING")
+        self.assertEqual(project.created_by, user)
 
         edit_response = self.client.post(
             reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
@@ -1332,6 +1333,127 @@ class ProductionFlowTests(TestCase):
         project.refresh_from_db()
         self.assertQuerySetEqual(project.assigned_editors.all(), [])
         self.assertQuerySetEqual(project.assigned_writers.all(), [second_writer])
+
+    def test_project_creator_can_archive_and_restore_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        self.client.force_login(creator)
+        self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "Creator Project",
+                "description": "",
+                "status": VideoProject.Status.SCRIPTING,
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+        project = group.projects.get(title="Creator Project")
+
+        archive_response = self.client.post(reverse("project_archive", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        project.refresh_from_db()
+        self.assertRedirects(archive_response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertIsNotNone(project.archived_at)
+        self.assertTrue(ProjectNote.objects.filter(project=project, body="Project archived.").exists())
+
+        restore_response = self.client.post(reverse("project_restore", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        project.refresh_from_db()
+        self.assertRedirects(restore_response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertIsNone(project.archived_at)
+        self.assertTrue(ProjectNote.objects.filter(project=project, body="Project restored.").exists())
+
+    def test_owner_and_admin_can_archive_and_restore_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        owner = FocusUser.objects.create(display_name="Owner")
+        admin = FocusUser.objects.create(display_name="Admin")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=admin, group=group, role=Membership.Role.ADMIN)
+        project = VideoProject.objects.create(group=group, title="Team Project", created_by=creator)
+        self.client.force_login(owner)
+
+        archive_response = self.client.post(reverse("project_archive", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        project.refresh_from_db()
+        self.assertRedirects(archive_response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertIsNotNone(project.archived_at)
+
+        self.client.force_login(admin)
+        restore_response = self.client.post(reverse("project_restore", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        project.refresh_from_db()
+        self.assertRedirects(restore_response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertIsNone(project.archived_at)
+
+    def test_member_who_is_not_creator_owner_or_admin_cannot_archive_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Team Project", created_by=creator)
+        self.client.force_login(editor)
+
+        response = self.client.post(reverse("project_archive", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        project.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertIsNone(project.archived_at)
+
+    def test_archived_projects_are_hidden_from_active_assignment_lists(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor", show_assigned_projects=True)
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        member_membership = Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        active_project = VideoProject.objects.create(group=group, title="Active Assignment")
+        archived_project = VideoProject.objects.create(
+            group=group,
+            title="Archived Assignment",
+            archived_at=timezone.now(),
+        )
+        active_project.assigned_editors.add(member)
+        archived_project.assigned_editors.add(member)
+
+        self.client.force_login(owner)
+        group_response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+        archived_response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}), {"archive": "1"})
+        profile_response = self.client.get(reverse("member_profile", kwargs={"slug": group.slug, "pk": member_membership.pk}))
+
+        self.assertContains(group_response, "Active Assignment")
+        self.assertNotContains(group_response, "Archived Assignment")
+        self.assertContains(group_response, "Archived projects (1)")
+        self.assertContains(archived_response, "Archived Assignment")
+        self.assertNotContains(archived_response, "Active Assignment")
+        self.assertContains(profile_response, "Active Assignment")
+        self.assertNotContains(profile_response, "Archived Assignment")
+
+        self.client.force_login(member)
+        dashboard_response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(dashboard_response, "Active Assignment")
+        self.assertNotContains(dashboard_response, "Archived Assignment")
+
+    def test_archived_project_detail_remains_available_to_group_members(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        member = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=member, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Archived Project", archived_at=timezone.now())
+        self.client.force_login(member)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(response, "Archived Project")
+        self.assertContains(response, "Archive status")
+        self.assertContains(response, "Archived on")
 
     def test_project_assignment_form_uses_group_member_checkbox_groups(self):
         producer = FocusUser.objects.create(display_name="Producer")

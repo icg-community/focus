@@ -66,6 +66,7 @@ The project is in active development. The current app is a Django application wi
 - Archived projects are hidden from active project and assignment lists by default.
 - Download a Markdown export of a project's summary, links, resources, assignments, and notes.
 - Delete projects through a confirmation page when permitted.
+- Role-aware project permissions for editing, status updates, notes, resources, archive, restore, and deletion.
 
 ### Project Notes
 
@@ -93,7 +94,7 @@ The following areas are not complete yet:
 - More complete project lifecycle controls, such as richer export formats and retention options.
 - More complete notifications for project changes, notes, invites, and membership changes.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
-- More detailed permissions for admins, editors, writers, and talent.
+- More detailed per-assignment permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
 - Automated accessibility checks in continuous integration.
 - Broader manual accessibility testing notes for NVDA, JAWS, Narrator, VoiceOver, keyboard-only use, zoom, and high contrast.

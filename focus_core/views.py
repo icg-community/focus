@@ -63,8 +63,31 @@ def user_can_archive_project(user, project):
     return membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN} or project.created_by_id == user.pk
 
 
-def user_can_delete_project(user, project):
+def user_can_manage_project(user, project):
     return user_can_archive_project(user, project)
+
+
+def user_can_create_projects(user, group):
+    membership = user_group_membership(user, group)
+    if not membership:
+        return False
+    return membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN}
+
+
+def user_can_delete_project(user, project):
+    return user_can_manage_project(user, project)
+
+
+def user_can_update_project_activity(user, project):
+    if user_can_manage_project(user, project):
+        return True
+    membership = user_group_membership(user, project.group)
+    if not membership:
+        return False
+    return (
+        project.assigned_editors.filter(pk=user.pk).exists()
+        or project.assigned_writers.filter(pk=user.pk).exists()
+    )
 
 
 def user_can_remove_project_resource(user, resource):
@@ -72,8 +95,7 @@ def user_can_remove_project_resource(user, resource):
     if not membership:
         return False
     return (
-        membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN}
-        or resource.project.created_by_id == user.pk
+        user_can_manage_project(user, resource.project)
         or resource.added_by_id == user.pk
     )
 
@@ -86,6 +108,15 @@ def project_resource_rows(user, project):
         }
         for resource in project.resources.select_related("added_by")
     ]
+
+
+def project_permission_context(user, project):
+    return {
+        "can_manage_project": user_can_manage_project(user, project),
+        "can_update_project_activity": user_can_update_project_activity(user, project),
+        "can_archive_project": user_can_archive_project(user, project),
+        "can_delete_project": user_can_delete_project(user, project),
+    }
 
 
 def export_date(value):
@@ -694,6 +725,7 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
                 "project": project,
                 "latest_note": project.prefetched_notes[0] if project.prefetched_notes else None,
                 "can_archive": user_can_archive_project(self.request.user, project),
+                "can_manage": user_can_manage_project(self.request.user, project),
             }
             for project in projects
         ]
@@ -704,6 +736,7 @@ class GroupDetailView(LoginRequiredMixin, DetailView):
         context["archived_project_count"] = archived_project_count
         context["selected_archive"] = selected_archive
         context["selected_status"] = selected_status
+        context["can_create_projects"] = user_can_create_projects(self.request.user, self.object)
         context["project_scope_filters"] = [
             {
                 "label": "Active projects",
@@ -990,6 +1023,8 @@ class ProjectCreateView(LoginRequiredMixin, CreateView):
 
     def dispatch(self, request, *args, **kwargs):
         self.group = get_object_or_404(ProductionGroup, slug=kwargs["slug"], members__user=request.user)
+        if not user_can_create_projects(request.user, self.group):
+            raise PermissionDenied("Only group owners or admins can create projects.")
         return super().dispatch(request, *args, **kwargs)
 
     def form_valid(self, form):
@@ -1033,8 +1068,7 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context.setdefault("resource_form", ProjectResourceForm())
         context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
-        context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
-        context["can_delete_project"] = user_can_delete_project(self.request.user, self.object)
+        context.update(project_permission_context(self.request.user, self.object))
         return context
 
 
@@ -1072,6 +1106,9 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
 
     def post(self, request, *args, **kwargs):
         project = self.get_project()
+        if not user_can_update_project_activity(request.user, project):
+            raise PermissionDenied("Only assigned collaborators, the project creator, group owners, or admins can add project notes.")
+
         form = ProjectNoteForm(request.POST)
         if form.is_valid():
             note = form.save(commit=False)
@@ -1089,8 +1126,7 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
             "resource_form": ProjectResourceForm(),
             "resource_rows": project_resource_rows(request.user, project),
             "notes": project.notes.select_related("author"),
-            "can_archive_project": user_can_archive_project(request.user, project),
-            "can_delete_project": user_can_delete_project(request.user, project),
+            **project_permission_context(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
 
@@ -1109,6 +1145,9 @@ class ProjectResourceCreateView(LoginRequiredMixin, View):
 
     def post(self, request, *args, **kwargs):
         project = self.get_project()
+        if not user_can_update_project_activity(request.user, project):
+            raise PermissionDenied("Only assigned collaborators, the project creator, group owners, or admins can add project resources.")
+
         form = ProjectResourceForm(request.POST)
         if form.is_valid():
             resource = form.save(commit=False)
@@ -1131,8 +1170,7 @@ class ProjectResourceCreateView(LoginRequiredMixin, View):
             "resource_form": form,
             "resource_rows": project_resource_rows(request.user, project),
             "notes": project.notes.select_related("author"),
-            "can_archive_project": user_can_archive_project(request.user, project),
-            "can_delete_project": user_can_delete_project(request.user, project),
+            **project_permission_context(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
 
@@ -1262,6 +1300,12 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
             .prefetch_related("assigned_editors", "assigned_writers")
         )
 
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if not user_can_update_project_activity(request.user, self.object):
+            raise PermissionDenied("Only assigned collaborators, the project creator, group owners, or admins can update project status.")
+        return super().dispatch(request, *args, **kwargs)
+
     def form_valid(self, form):
         previous_status = VideoProject.objects.values_list("status", flat=True).get(pk=self.object.pk)
         response = super().form_valid(form)
@@ -1286,8 +1330,7 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         context["resource_form"] = ProjectResourceForm()
         context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
-        context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
-        context["can_delete_project"] = user_can_delete_project(self.request.user, self.object)
+        context.update(project_permission_context(self.request.user, self.object))
         return context
 
     def get_success_url(self):
@@ -1301,6 +1344,12 @@ class ProjectUpdateView(LoginRequiredMixin, UpdateView):
 
     def get_queryset(self):
         return VideoProject.objects.filter(group__slug=self.kwargs["group_slug"], group__members__user=self.request.user)
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if not user_can_manage_project(request.user, self.object):
+            raise PermissionDenied("Only the project creator, group owners, or admins can edit projects.")
+        return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()

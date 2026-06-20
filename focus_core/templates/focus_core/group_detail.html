@@ -16,7 +16,9 @@
         <h1>{{ object.name }}</h1>
     </div>
     <div class="action-row">
-        <a class="button" href="{% url 'project_create' object.slug %}">Create project</a>
+        {% if can_create_projects %}
+            <a class="button" href="{% url 'project_create' object.slug %}">Create project</a>
+        {% endif %}
         <a class="button button--secondary" href="{% url 'group_members' object.slug %}">View members</a>
         {% if membership.role == "OWNER" %}
             <a class="button button--secondary" href="{% url 'group_invitations' object.slug %}">Manage invitations</a>
@@ -87,7 +89,11 @@
                             </td>
                             <td>
                                 <div class="table-actions">
-                                    <a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a>
+                                    {% if row.can_manage %}
+                                        <a href="{% url 'project_update' object.slug project.pk %}">Edit {{ project.title }}</a>
+                                    {% else %}
+                                        <a href="{% url 'project_detail' object.slug project.pk %}">View {{ project.title }}</a>
+                                    {% endif %}
                                     {% if row.can_archive %}
                                         {% if project.archived_at %}
                                             <form method="post" action="{% url 'project_restore' object.slug project.pk %}" class="inline-form">
@@ -129,8 +135,12 @@
     {% else %}
         <div class="empty-state">
             <h3>No projects yet</h3>
-            <p>Create a project to track production status, script links, and asset folders.</p>
-            <a class="button" href="{% url 'project_create' object.slug %}">Create first project</a>
+            {% if can_create_projects %}
+                <p>Create a project to track production status, script links, and asset folders.</p>
+                <a class="button" href="{% url 'project_create' object.slug %}">Create first project</a>
+            {% else %}
+                <p>Projects will appear here when a group owner or admin creates them.</p>
+            {% endif %}
         </div>
     {% endif %}
 </section>

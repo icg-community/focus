@@ -17,7 +17,9 @@
         <h1>{{ object.title }}</h1>
     </div>
     <div class="action-row">
-        <a class="button" href="{% url 'project_update' group.slug object.pk %}">Edit {{ object.title }}</a>
+        {% if can_manage_project %}
+            <a class="button" href="{% url 'project_update' group.slug object.pk %}">Edit {{ object.title }}</a>
+        {% endif %}
         <a class="button button--secondary" href="{% url 'project_export' group.slug object.pk %}">Download {{ object.title }} export (Markdown)</a>
         {% if can_delete_project %}
             <a class="button button--danger" href="{% url 'project_delete' group.slug object.pk %}">Delete {{ object.title }}</a>
@@ -40,12 +42,14 @@
 
 <section class="section-block">
     <h2>Project details</h2>
-    {% include "focus_core/includes/form_errors.html" with form=status_form %}
-    <form method="post" action="{% url 'project_status_update' group.slug object.pk %}" class="status-form">
-        {% csrf_token %}
-        {% include "focus_core/includes/field.html" with field=status_form.status %}
-        <button type="submit" class="button">Update status</button>
-    </form>
+    {% if can_update_project_activity %}
+        {% include "focus_core/includes/form_errors.html" with form=status_form %}
+        <form method="post" action="{% url 'project_status_update' group.slug object.pk %}" class="status-form">
+            {% csrf_token %}
+            {% include "focus_core/includes/field.html" with field=status_form.status %}
+            <button type="submit" class="button">Update status</button>
+        </form>
+    {% endif %}
     <dl class="detail-list">
         <div>
             <dt>Status</dt>
@@ -100,18 +104,20 @@
 
 <section class="section-block" id="project-resources">
     <h2>Project resources</h2>
-    <section class="content-narrow">
-        <h3>Add a resource</h3>
-        {% include "focus_core/includes/form_errors.html" with form=resource_form %}
-        <form method="post" action="{% url 'project_resource_create' group.slug object.pk %}" class="form-stack" novalidate>
-            {% csrf_token %}
-            <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
-            {% include "focus_core/includes/field.html" with field=resource_form.kind %}
-            {% include "focus_core/includes/field.html" with field=resource_form.title %}
-            {% include "focus_core/includes/field.html" with field=resource_form.url %}
-            <button type="submit" class="button">Add resource</button>
-        </form>
-    </section>
+    {% if can_update_project_activity %}
+        <section class="content-narrow">
+            <h3>Add a resource</h3>
+            {% include "focus_core/includes/form_errors.html" with form=resource_form %}
+            <form method="post" action="{% url 'project_resource_create' group.slug object.pk %}" class="form-stack" novalidate>
+                {% csrf_token %}
+                <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+                {% include "focus_core/includes/field.html" with field=resource_form.kind %}
+                {% include "focus_core/includes/field.html" with field=resource_form.title %}
+                {% include "focus_core/includes/field.html" with field=resource_form.url %}
+                <button type="submit" class="button">Add resource</button>
+            </form>
+        </section>
+    {% endif %}
 
     <section class="section-block">
         <h3>Resource links</h3>
@@ -174,16 +180,18 @@
 
 <section class="section-block" id="project-notes">
     <h2>Project notes</h2>
-    <section class="content-narrow">
-        <h3>Add a note</h3>
-        {% include "focus_core/includes/form_errors.html" with form=note_form %}
-        <form method="post" action="{% url 'project_note_create' group.slug object.pk %}" class="form-stack" novalidate>
-            {% csrf_token %}
-            <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
-            {% include "focus_core/includes/field.html" with field=note_form.body %}
-            <button type="submit" class="button">Add note</button>
-        </form>
-    </section>
+    {% if can_update_project_activity %}
+        <section class="content-narrow">
+            <h3>Add a note</h3>
+            {% include "focus_core/includes/form_errors.html" with form=note_form %}
+            <form method="post" action="{% url 'project_note_create' group.slug object.pk %}" class="form-stack" novalidate>
+                {% csrf_token %}
+                <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+                {% include "focus_core/includes/field.html" with field=note_form.body %}
+                <button type="submit" class="button">Add note</button>
+            </form>
+        </section>
+    {% endif %}
 
     <section class="section-block">
         <h3>Note history</h3>

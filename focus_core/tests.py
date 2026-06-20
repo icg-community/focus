@@ -1351,6 +1351,118 @@ class ProductionFlowTests(TestCase):
         self.assertRedirects(edit_response, reverse("group_detail", kwargs={"slug": group.slug}))
         self.assertEqual(project.status, "EDITING")
 
+    def test_admin_can_create_project(self):
+        admin = FocusUser.objects.create(display_name="Admin")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=admin, group=group, role=Membership.Role.ADMIN)
+        self.client.force_login(admin)
+
+        response = self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "Admin Project",
+                "description": "",
+                "status": VideoProject.Status.IDEA,
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        project = group.projects.get(title="Admin Project")
+        self.assertRedirects(response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertEqual(project.created_by, admin)
+
+    def test_member_who_is_not_owner_or_admin_cannot_create_project(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(writer)
+
+        page_response = self.client.get(reverse("project_create", kwargs={"slug": group.slug}))
+        create_response = self.client.post(
+            reverse("project_create", kwargs={"slug": group.slug}),
+            {
+                "title": "Writer Project",
+                "description": "",
+                "status": VideoProject.Status.IDEA,
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        self.assertEqual(page_response.status_code, 403)
+        self.assertEqual(create_response.status_code, 403)
+        self.assertFalse(group.projects.filter(title="Writer Project").exists())
+
+    def test_group_detail_hides_project_create_links_from_members_who_cannot_create_projects(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        self.client.force_login(writer)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "Projects will appear here when a group owner or admin creates them.")
+        self.assertNotContains(response, reverse("project_create", kwargs={"slug": group.slug}))
+        self.assertNotContains(response, "Create project")
+        self.assertNotContains(response, "Create first project")
+
+    def test_project_creator_can_edit_their_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        owner = FocusUser.objects.create(display_name="Owner")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Creator Project", created_by=creator)
+        self.client.force_login(creator)
+
+        response = self.client.post(
+            reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "title": "Updated Creator Project",
+                "description": "",
+                "status": VideoProject.Status.SCRIPTING,
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        project.refresh_from_db()
+        self.assertRedirects(response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertEqual(project.title, "Updated Creator Project")
+
+    def test_assigned_collaborator_cannot_edit_core_project_details(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        project.assigned_editors.add(editor)
+        self.client.force_login(editor)
+
+        get_response = self.client.get(reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        post_response = self.client.post(
+            reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "title": "Changed By Editor",
+                "description": "",
+                "status": VideoProject.Status.REVIEW,
+                "asset_pipeline_url": "",
+                "script_url": "",
+            },
+        )
+
+        project.refresh_from_db()
+        self.assertEqual(get_response.status_code, 403)
+        self.assertEqual(post_response.status_code, 403)
+        self.assertEqual(project.title, "Launch Video")
+        self.assertEqual(project.status, VideoProject.Status.IDEA)
+
     def test_project_assignments_can_be_created_and_updated(self):
         producer = FocusUser.objects.create(display_name="Producer")
         editor = FocusUser.objects.create(display_name="Editor")
@@ -1403,18 +1515,13 @@ class ProductionFlowTests(TestCase):
         group = ProductionGroup.objects.create(name="Studio", slug="studio")
         Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
         Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
-        self.client.force_login(creator)
-        self.client.post(
-            reverse("project_create", kwargs={"slug": group.slug}),
-            {
-                "title": "Creator Project",
-                "description": "",
-                "status": VideoProject.Status.SCRIPTING,
-                "asset_pipeline_url": "",
-                "script_url": "",
-            },
+        project = VideoProject.objects.create(
+            group=group,
+            title="Creator Project",
+            status=VideoProject.Status.SCRIPTING,
+            created_by=creator,
         )
-        project = group.projects.get(title="Creator Project")
+        self.client.force_login(creator)
 
         archive_response = self.client.post(reverse("project_archive", kwargs={"group_slug": group.slug, "pk": project.pk}))
 
@@ -1583,6 +1690,41 @@ class ProductionFlowTests(TestCase):
 
         self.assertContains(response, "Delete Launch Video")
         self.assertContains(response, reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+    def test_project_detail_hides_change_controls_from_unassigned_member(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        talent = FocusUser.objects.create(display_name="Talent")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=talent, group=group, role=Membership.Role.TALENT)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        self.client.force_login(talent)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(response, "Launch Video")
+        self.assertContains(response, "Download Launch Video export (Markdown)")
+        self.assertNotContains(response, reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertNotContains(response, reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertNotContains(response, reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertNotContains(response, reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertNotContains(response, "Update status")
+        self.assertNotContains(response, "Add resource")
+        self.assertNotContains(response, "Add note")
+
+    def test_group_detail_shows_view_action_for_members_who_cannot_manage_project(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        talent = FocusUser.objects.create(display_name="Talent")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=talent, group=group, role=Membership.Role.TALENT)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        self.client.force_login(talent)
+
+        response = self.client.get(reverse("group_detail", kwargs={"slug": group.slug}))
+
+        self.assertContains(response, "View Launch Video")
+        self.assertNotContains(response, reverse("project_update", kwargs={"group_slug": group.slug, "pk": project.pk}))
 
     def test_group_member_can_export_project_as_markdown(self):
         producer = FocusUser.objects.create(display_name="Producer")
@@ -1754,6 +1896,7 @@ class ProductionFlowTests(TestCase):
         Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
         Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
         project = VideoProject.objects.create(group=group, title="Launch Video", created_by=producer)
+        project.assigned_editors.add(editor)
         resource = ProjectResource.objects.create(
             project=project,
             added_by=editor,
@@ -1781,6 +1924,7 @@ class ProductionFlowTests(TestCase):
         Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
         Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
         project = VideoProject.objects.create(group=group, title="Launch Video")
+        project.assigned_editors.add(editor)
         self.client.force_login(editor)
 
         response = self.client.post(
@@ -1802,6 +1946,27 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(resource.title, "Shared asset folder")
         self.assertEqual(resource.kind, ProjectResource.Kind.ASSETS)
         self.assertTrue(ProjectNote.objects.filter(project=project, body="Resource added: Shared asset folder (Asset folder).").exists())
+
+    def test_unassigned_member_cannot_add_project_resource(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        self.client.force_login(editor)
+
+        response = self.client.post(
+            reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "kind": ProjectResource.Kind.SCRIPT,
+                "title": "Private script",
+                "url": "https://example.com/script",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ProjectResource.objects.filter(project=project).exists())
 
     def test_project_resource_errors_are_exposed_to_assistive_technology(self):
         producer = FocusUser.objects.create(display_name="Producer")
@@ -1923,6 +2088,7 @@ class ProductionFlowTests(TestCase):
         Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
         Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
         project = VideoProject.objects.create(group=group, title="Launch Video")
+        project.assigned_editors.add(editor)
         self.client.force_login(editor)
 
         response = self.client.post(
@@ -1938,6 +2104,23 @@ class ProductionFlowTests(TestCase):
         )
         self.assertEqual(note.author, editor)
         self.assertEqual(note.body, "Script draft updated. Ready for edit pass.")
+
+    def test_unassigned_member_cannot_add_project_note(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=owner)
+        self.client.force_login(editor)
+
+        response = self.client.post(
+            reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"body": "I should not be able to add this."},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(ProjectNote.objects.filter(project=project).exists())
 
     def test_project_detail_shows_notes_newest_first(self):
         producer = FocusUser.objects.create(display_name="Producer")
@@ -2012,6 +2195,53 @@ class ProductionFlowTests(TestCase):
         project.refresh_from_db()
         self.assertRedirects(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertEqual(project.status, VideoProject.Status.REVIEW)
+
+    def test_assigned_collaborator_can_update_project_status(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+            created_by=owner,
+        )
+        project.assigned_writers.add(writer)
+        self.client.force_login(writer)
+
+        response = self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        project.refresh_from_db()
+        self.assertRedirects(response, reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertEqual(project.status, VideoProject.Status.REVIEW)
+
+    def test_unassigned_member_cannot_update_project_status(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(
+            group=group,
+            title="Launch Video",
+            status=VideoProject.Status.SCRIPTING,
+            created_by=owner,
+        )
+        self.client.force_login(writer)
+
+        response = self.client.post(
+            reverse("project_status_update", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"status": VideoProject.Status.REVIEW},
+        )
+
+        project.refresh_from_db()
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(project.status, VideoProject.Status.SCRIPTING)
 
     def test_status_update_creates_project_note(self):
         producer = FocusUser.objects.create(display_name="Producer")

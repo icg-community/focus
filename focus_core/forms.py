@@ -1,6 +1,6 @@
 from django import forms
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectResource, VideoProject, WebAuthnCredential
 
 
 class AccessibleForm(forms.Form):
@@ -210,6 +210,22 @@ class ProjectNoteForm(AccessibleModelForm):
         }
         widgets = {
             "body": forms.Textarea(attrs={"rows": 4}),
+        }
+
+
+class ProjectResourceForm(AccessibleModelForm):
+    class Meta:
+        model = ProjectResource
+        fields = ["kind", "title", "url"]
+        labels = {
+            "kind": "Resource type",
+            "title": "Resource label",
+            "url": "Resource URL",
+        }
+        help_texts = {
+            "kind": "Choose the kind of production link this is.",
+            "title": "Use a short name people will recognize, such as Final script or Voice lines folder.",
+            "url": "Paste the shared link. Avoid links that expose private personal accounts.",
         }
 
 

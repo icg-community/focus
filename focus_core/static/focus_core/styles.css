@@ -456,7 +456,8 @@ textarea.field-control {
     gap: 1rem;
 }
 
-.note-list {
+.note-list,
+.resource-list {
     display: grid;
     gap: 1rem;
     list-style: none;
@@ -464,18 +465,21 @@ textarea.field-control {
     padding: 0;
 }
 
-.note-item {
+.note-item,
+.resource-item {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     padding: 1rem;
 }
 
-.note-item h4 {
+.note-item h4,
+.resource-item h4 {
     margin: 0 0 0.25rem;
 }
 
-.note-item p {
+.note-item p,
+.resource-item p {
     margin: 0.5rem 0 0;
 }
 

@@ -204,6 +204,30 @@ class ProjectNote(models.Model):
         return f"Note on {self.project.title} by {self.author.public_name}"
 
 
+class ProjectResource(models.Model):
+    class Kind(models.TextChoices):
+        SCRIPT = "SCRIPT", "Script"
+        ASSETS = "ASSETS", "Asset folder"
+        VOICE_LINES = "VOICE_LINES", "Voice lines"
+        EDIT = "EDIT", "Edit timeline"
+        REVIEW = "REVIEW", "Review link"
+        REFERENCE = "REFERENCE", "Reference"
+        OTHER = "OTHER", "Other"
+
+    project = models.ForeignKey(VideoProject, on_delete=models.CASCADE, related_name="resources")
+    added_by = models.ForeignKey(FocusUser, null=True, blank=True, on_delete=models.SET_NULL, related_name="project_resources")
+    kind = models.CharField(max_length=15, choices=Kind.choices, default=Kind.OTHER)
+    title = models.CharField(max_length=150)
+    url = models.URLField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["kind", "title"]
+
+    def __str__(self):
+        return f"{self.title} for {self.project.title}"
+
+
 class GroupInvitation(models.Model):
     group = models.ForeignKey(ProductionGroup, on_delete=models.CASCADE, related_name="invitations")
     token = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)

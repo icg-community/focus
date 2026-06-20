@@ -63,6 +63,16 @@ urlpatterns = [
         name="project_note_create",
     ),
     path(
+        "groups/<slug:group_slug>/projects/<int:pk>/resources/new/",
+        views.ProjectResourceCreateView.as_view(),
+        name="project_resource_create",
+    ),
+    path(
+        "groups/<slug:group_slug>/projects/<int:pk>/resources/<int:resource_pk>/remove/",
+        views.ProjectResourceRemoveView.as_view(),
+        name="project_resource_remove",
+    ),
+    path(
         "groups/<slug:group_slug>/projects/<int:pk>/archive/",
         views.ProjectArchiveView.as_view(),
         name="project_archive",

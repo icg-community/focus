@@ -27,8 +27,8 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectStatusForm, VideoProjectForm
-from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, RecoveryCode, VideoProject, WebAuthnCredential
+from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectResourceForm, ProjectStatusForm, VideoProjectForm
+from .models import AuthIdentity, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 RECOVERY_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -61,6 +61,27 @@ def user_can_archive_project(user, project):
     if not membership:
         return False
     return membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN} or project.created_by_id == user.pk
+
+
+def user_can_remove_project_resource(user, resource):
+    membership = user_group_membership(user, resource.project.group)
+    if not membership:
+        return False
+    return (
+        membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN}
+        or resource.project.created_by_id == user.pk
+        or resource.added_by_id == user.pk
+    )
+
+
+def project_resource_rows(user, project):
+    return [
+        {
+            "resource": resource,
+            "can_remove": user_can_remove_project_resource(user, resource),
+        }
+        for resource in project.resources.select_related("added_by")
+    ]
 
 
 def generate_recovery_code():
@@ -935,6 +956,8 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context["group"] = self.object.group
         context.setdefault("status_form", ProjectStatusForm(instance=self.object))
         context.setdefault("note_form", ProjectNoteForm())
+        context.setdefault("resource_form", ProjectResourceForm())
+        context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
         context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
         return context
@@ -968,10 +991,77 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
             "group": project.group,
             "status_form": ProjectStatusForm(instance=project),
             "note_form": form,
+            "resource_form": ProjectResourceForm(),
+            "resource_rows": project_resource_rows(request.user, project),
             "notes": project.notes.select_related("author"),
             "can_archive_project": user_can_archive_project(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
+
+
+class ProjectResourceCreateView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            )
+            .select_related("group", "created_by")
+            .prefetch_related("assigned_editors", "assigned_writers"),
+            pk=self.kwargs["pk"],
+        )
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        form = ProjectResourceForm(request.POST)
+        if form.is_valid():
+            resource = form.save(commit=False)
+            resource.project = project
+            resource.added_by = request.user
+            resource.save()
+            ProjectNote.objects.create(
+                project=project,
+                author=request.user,
+                body=f"Resource added: {resource.title} ({resource.get_kind_display()}).",
+            )
+            messages.success(request, f"Added {resource.title} to {project.title}.")
+            return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-resources")
+
+        context = {
+            "object": project,
+            "group": project.group,
+            "status_form": ProjectStatusForm(instance=project),
+            "note_form": ProjectNoteForm(),
+            "resource_form": form,
+            "resource_rows": project_resource_rows(request.user, project),
+            "notes": project.notes.select_related("author"),
+            "can_archive_project": user_can_archive_project(request.user, project),
+        }
+        return render(request, "focus_core/project_detail.html", context)
+
+
+class ProjectResourceRemoveView(LoginRequiredMixin, View):
+    def get_resource(self):
+        return get_object_or_404(
+            ProjectResource.objects.filter(
+                project__group__slug=self.kwargs["group_slug"],
+                project__group__members__user=self.request.user,
+            ).select_related("project", "project__group", "project__created_by", "added_by"),
+            pk=self.kwargs["resource_pk"],
+            project_id=self.kwargs["pk"],
+        )
+
+    def post(self, request, *args, **kwargs):
+        resource = self.get_resource()
+        project = resource.project
+        if not user_can_remove_project_resource(request.user, resource):
+            raise PermissionDenied("Only the person who added this resource, the project creator, group owners, or admins can remove it.")
+
+        title = resource.title
+        resource.delete()
+        ProjectNote.objects.create(project=project, author=request.user, body=f"Resource removed: {title}.")
+        messages.success(request, f"Removed {title} from {project.title}.")
+        return redirect(f"{reverse('project_detail', kwargs={'group_slug': project.group.slug, 'pk': project.pk})}#project-resources")
 
 
 class ProjectArchiveView(LoginRequiredMixin, View):
@@ -1060,6 +1150,8 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         context["group"] = self.object.group
         context["status_form"] = context["form"]
         context["note_form"] = ProjectNoteForm()
+        context["resource_form"] = ProjectResourceForm()
+        context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
         context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
         return context

@@ -58,6 +58,7 @@ The project is in active development. The current app is a Django application wi
 
 - Create and edit video projects inside a production group.
 - Track project title, description, status, script URL, asset pipeline URL, assigned editors, and assigned writers.
+- Add multiple named project resource links for scripts, asset folders, voice lines, edit timelines, review links, references, and other production materials.
 - Status filters on group project lists.
 - Assigned project list on the signed-in user's dashboard.
 - Assigned projects can be shown on opted-in member profiles.
@@ -89,7 +90,7 @@ The following areas are not complete yet:
 - Production-ready authentication provider integrations beyond the local development provider.
 - More complete project lifecycle controls, such as project deletion or export.
 - More complete notifications for project changes, notes, invites, and membership changes.
-- Richer project assets and script tracking.
+- Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
 - More detailed permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
 - Automated accessibility checks in continuous integration.
@@ -193,7 +194,7 @@ FOCUS is intended to follow WCAG 2.2 AA. When changing templates, forms, or fron
 
 ```text
 focus_core/
-  models.py        Core data model for users, auth identities, groups, projects, notes, invites, and passkeys.
+  models.py        Core data model for users, auth identities, groups, projects, resources, notes, invites, and passkeys.
   forms.py         Accessible Django forms and model forms.
   views.py         Sign-in, account safety, groups, members, invites, projects, and notes views.
   urls.py          Application routes.

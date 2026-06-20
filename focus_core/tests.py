@@ -9,7 +9,7 @@ from django.urls import reverse
 from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
-from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, RecoveryCode, VideoProject, WebAuthnCredential
+from .models import AuthIdentity, FocusUser, GroupInvitation, Membership, ProductionGroup, ProjectNote, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
 class FocusUserTests(TestCase):
@@ -1568,6 +1568,175 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Project notes")
         self.assertContains(response, reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "No notes have been added yet.")
+
+    def test_project_detail_shows_resources_and_add_form(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=producer)
+        resource = ProjectResource.objects.create(
+            project=project,
+            added_by=editor,
+            kind=ProjectResource.Kind.SCRIPT,
+            title="Final script",
+            url="https://example.com/script",
+        )
+        self.client.force_login(editor)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(response, "Project resources")
+        self.assertContains(response, "Add a resource")
+        self.assertContains(response, reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertContains(response, "Final script")
+        self.assertContains(response, "Script")
+        self.assertContains(response, "Added by Editor")
+        self.assertContains(response, "Open Final script for Launch Video")
+        self.assertContains(response, reverse("project_resource_remove", kwargs={"group_slug": group.slug, "pk": project.pk, "resource_pk": resource.pk}))
+
+    def test_group_member_can_add_project_resource(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(editor)
+
+        response = self.client.post(
+            reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "kind": ProjectResource.Kind.ASSETS,
+                "title": "Shared asset folder",
+                "url": "https://example.com/assets",
+            },
+        )
+
+        resource = ProjectResource.objects.get(project=project)
+        self.assertRedirects(
+            response,
+            f"{reverse('project_detail', kwargs={'group_slug': group.slug, 'pk': project.pk})}#project-resources",
+            fetch_redirect_response=False,
+        )
+        self.assertEqual(resource.added_by, editor)
+        self.assertEqual(resource.title, "Shared asset folder")
+        self.assertEqual(resource.kind, ProjectResource.Kind.ASSETS)
+        self.assertTrue(ProjectNote.objects.filter(project=project, body="Resource added: Shared asset folder (Asset folder).").exists())
+
+    def test_project_resource_errors_are_exposed_to_assistive_technology(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(producer)
+
+        response = self.client.post(
+            reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {"kind": ProjectResource.Kind.SCRIPT, "title": "", "url": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(ProjectResource.objects.filter(project=project).exists())
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="title-error"')
+        self.assertContains(response, 'id="url-error"')
+
+    def test_non_member_cannot_add_project_resource(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.post(
+            reverse("project_resource_create", kwargs={"group_slug": group.slug, "pk": project.pk}),
+            {
+                "kind": ProjectResource.Kind.SCRIPT,
+                "title": "Private script",
+                "url": "https://example.com/script",
+            },
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(ProjectResource.objects.filter(project=project).exists())
+
+    def test_resource_adder_can_remove_project_resource(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        resource = ProjectResource.objects.create(
+            project=project,
+            added_by=editor,
+            kind=ProjectResource.Kind.REVIEW,
+            title="Review cut",
+            url="https://example.com/review",
+        )
+        self.client.force_login(editor)
+
+        response = self.client.post(reverse("project_resource_remove", kwargs={"group_slug": group.slug, "pk": project.pk, "resource_pk": resource.pk}))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('project_detail', kwargs={'group_slug': group.slug, 'pk': project.pk})}#project-resources",
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(ProjectResource.objects.filter(pk=resource.pk).exists())
+        self.assertTrue(ProjectNote.objects.filter(project=project, body="Resource removed: Review cut.").exists())
+
+    def test_owner_can_remove_project_resource_added_by_member(self):
+        owner = FocusUser.objects.create(display_name="Owner")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        resource = ProjectResource.objects.create(
+            project=project,
+            added_by=editor,
+            kind=ProjectResource.Kind.REVIEW,
+            title="Review cut",
+            url="https://example.com/review",
+        )
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("project_resource_remove", kwargs={"group_slug": group.slug, "pk": project.pk, "resource_pk": resource.pk}))
+
+        self.assertRedirects(
+            response,
+            f"{reverse('project_detail', kwargs={'group_slug': group.slug, 'pk': project.pk})}#project-resources",
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(ProjectResource.objects.filter(pk=resource.pk).exists())
+
+    def test_member_who_did_not_add_resource_cannot_remove_it(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        writer = FocusUser.objects.create(display_name="Writer")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        Membership.objects.create(user=writer, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=creator)
+        resource = ProjectResource.objects.create(
+            project=project,
+            added_by=editor,
+            kind=ProjectResource.Kind.REVIEW,
+            title="Review cut",
+            url="https://example.com/review",
+        )
+        self.client.force_login(writer)
+
+        response = self.client.post(reverse("project_resource_remove", kwargs={"group_slug": group.slug, "pk": project.pk, "resource_pk": resource.pk}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(ProjectResource.objects.filter(pk=resource.pk).exists())
 
     def test_group_member_can_add_project_note(self):
         producer = FocusUser.objects.create(display_name="Producer")

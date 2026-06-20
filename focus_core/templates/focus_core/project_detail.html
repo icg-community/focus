@@ -94,6 +94,54 @@
     </dl>
 </section>
 
+<section class="section-block" id="project-resources">
+    <h2>Project resources</h2>
+    <section class="content-narrow">
+        <h3>Add a resource</h3>
+        {% include "focus_core/includes/form_errors.html" with form=resource_form %}
+        <form method="post" action="{% url 'project_resource_create' group.slug object.pk %}" class="form-stack" novalidate>
+            {% csrf_token %}
+            <p class="required-note">Fields marked with <span aria-hidden="true">*</span> are required.</p>
+            {% include "focus_core/includes/field.html" with field=resource_form.kind %}
+            {% include "focus_core/includes/field.html" with field=resource_form.title %}
+            {% include "focus_core/includes/field.html" with field=resource_form.url %}
+            <button type="submit" class="button">Add resource</button>
+        </form>
+    </section>
+
+    <section class="section-block">
+        <h3>Resource links</h3>
+        {% if resource_rows %}
+            <ul class="resource-list">
+                {% for row in resource_rows %}
+                    <li class="resource-item">
+                        <article>
+                            <h4>{{ row.resource.title }}</h4>
+                            <p class="field-help">
+                                {{ row.resource.get_kind_display }}.
+                                {% if row.resource.added_by %}Added by {{ row.resource.added_by.public_name }} on {{ row.resource.created_at|date:"M j, Y" }}.{% else %}Added on {{ row.resource.created_at|date:"M j, Y" }}.{% endif %}
+                            </p>
+                            <div class="action-row">
+                                <a href="{{ row.resource.url }}">Open {{ row.resource.title }} for {{ object.title }}</a>
+                                {% if row.can_remove %}
+                                    <form method="post" action="{% url 'project_resource_remove' group.slug object.pk row.resource.pk %}" class="inline-form">
+                                        {% csrf_token %}
+                                        <button type="submit" class="button button--danger">Remove {{ row.resource.title }}</button>
+                                    </form>
+                                {% endif %}
+                            </div>
+                        </article>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% else %}
+            <div class="empty-state">
+                <p>No resource links have been added yet.</p>
+            </div>
+        {% endif %}
+    </section>
+</section>
+
 <section class="section-block">
     <h2>Assignments</h2>
     <div class="assignment-grid">

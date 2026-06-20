@@ -19,6 +19,9 @@
     <div class="action-row">
         <a class="button" href="{% url 'project_update' group.slug object.pk %}">Edit {{ object.title }}</a>
         <a class="button button--secondary" href="{% url 'project_export' group.slug object.pk %}">Download {{ object.title }} export (Markdown)</a>
+        {% if can_delete_project %}
+            <a class="button button--danger" href="{% url 'project_delete' group.slug object.pk %}">Delete {{ object.title }}</a>
+        {% endif %}
         {% if can_archive_project %}
             {% if object.archived_at %}
                 <form method="post" action="{% url 'project_restore' group.slug object.pk %}" class="inline-form">

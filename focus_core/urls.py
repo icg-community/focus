@@ -87,6 +87,11 @@ urlpatterns = [
         views.ProjectRestoreView.as_view(),
         name="project_restore",
     ),
+    path(
+        "groups/<slug:group_slug>/projects/<int:pk>/delete/",
+        views.ProjectDeleteView.as_view(),
+        name="project_delete",
+    ),
     path("groups/<slug:group_slug>/projects/<int:pk>/edit/", views.ProjectUpdateView.as_view(), name="project_update"),
     path("invites/<uuid:token>/", views.InvitationAcceptView.as_view(), name="invite_accept"),
 ]

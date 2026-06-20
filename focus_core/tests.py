@@ -1567,9 +1567,22 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Update status")
         self.assertContains(response, "Download Launch Video export (Markdown)")
         self.assertContains(response, reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        self.assertNotContains(response, reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "Project notes")
         self.assertContains(response, reverse("project_note_create", kwargs={"group_slug": group.slug, "pk": project.pk}))
         self.assertContains(response, "No notes have been added yet.")
+
+    def test_project_detail_shows_delete_link_to_project_creator(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=creator)
+        self.client.force_login(creator)
+
+        response = self.client.get(reverse("project_detail", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(response, "Delete Launch Video")
+        self.assertContains(response, reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
 
     def test_group_member_can_export_project_as_markdown(self):
         producer = FocusUser.objects.create(display_name="Producer")
@@ -1649,6 +1662,90 @@ class ProductionFlowTests(TestCase):
         response = self.client.get(reverse("project_export", kwargs={"group_slug": group.slug, "pk": project.pk}))
 
         self.assertEqual(response.status_code, 404)
+
+    def test_project_creator_can_delete_project_from_confirmation_page(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Launch Video", created_by=creator)
+        project.assigned_editors.add(editor)
+        resource = ProjectResource.objects.create(
+            project=project,
+            added_by=creator,
+            kind=ProjectResource.Kind.REFERENCE,
+            title="Visual references",
+            url="https://example.com/reference",
+        )
+        note = ProjectNote.objects.create(project=project, author=creator, body="Ready to remove.")
+        self.client.force_login(creator)
+
+        page_response = self.client.get(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertContains(page_response, "Delete Launch Video")
+        self.assertContains(page_response, "This cannot be undone")
+        self.assertContains(page_response, "permanently removes its notes, resources, assignments, and project details")
+        self.assertContains(page_response, "Keep Launch Video")
+
+        delete_response = self.client.post(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertRedirects(delete_response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertFalse(VideoProject.objects.filter(pk=project.pk).exists())
+        self.assertFalse(ProjectResource.objects.filter(pk=resource.pk).exists())
+        self.assertFalse(ProjectNote.objects.filter(pk=note.pk).exists())
+
+    def test_owner_and_admin_can_delete_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        owner = FocusUser.objects.create(display_name="Owner")
+        admin = FocusUser.objects.create(display_name="Admin")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=owner, group=group, role=Membership.Role.OWNER)
+        Membership.objects.create(user=admin, group=group, role=Membership.Role.ADMIN)
+        owner_project = VideoProject.objects.create(group=group, title="Owner Delete", created_by=creator)
+        admin_project = VideoProject.objects.create(group=group, title="Admin Delete", created_by=creator)
+
+        self.client.force_login(owner)
+        owner_response = self.client.post(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": owner_project.pk}))
+
+        self.assertRedirects(owner_response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertFalse(VideoProject.objects.filter(pk=owner_project.pk).exists())
+
+        self.client.force_login(admin)
+        admin_response = self.client.post(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": admin_project.pk}))
+
+        self.assertRedirects(admin_response, reverse("group_detail", kwargs={"slug": group.slug}))
+        self.assertFalse(VideoProject.objects.filter(pk=admin_project.pk).exists())
+
+    def test_member_who_is_not_creator_owner_or_admin_cannot_delete_project(self):
+        creator = FocusUser.objects.create(display_name="Creator")
+        editor = FocusUser.objects.create(display_name="Editor")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=creator, group=group, role=Membership.Role.WRITER)
+        Membership.objects.create(user=editor, group=group, role=Membership.Role.EDITOR)
+        project = VideoProject.objects.create(group=group, title="Team Project", created_by=creator)
+        self.client.force_login(editor)
+
+        page_response = self.client.get(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+        delete_response = self.client.post(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertEqual(page_response.status_code, 403)
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertTrue(VideoProject.objects.filter(pk=project.pk).exists())
+
+    def test_non_member_cannot_delete_project(self):
+        producer = FocusUser.objects.create(display_name="Producer")
+        outsider = FocusUser.objects.create(display_name="Outsider")
+        group = ProductionGroup.objects.create(name="Studio", slug="studio")
+        Membership.objects.create(user=producer, group=group, role=Membership.Role.OWNER)
+        project = VideoProject.objects.create(group=group, title="Launch Video")
+        self.client.force_login(outsider)
+
+        response = self.client.get(reverse("project_delete", kwargs={"group_slug": group.slug, "pk": project.pk}))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(VideoProject.objects.filter(pk=project.pk).exists())
 
     def test_project_detail_shows_resources_and_add_form(self):
         producer = FocusUser.objects.create(display_name="Producer")

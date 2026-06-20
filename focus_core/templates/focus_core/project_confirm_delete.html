@@ -1,0 +1,44 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}Delete {{ object.title }}{% endblock %}
+
+{% block content %}
+<nav aria-label="Breadcrumb">
+    <ol class="breadcrumbs">
+        <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
+        <li><a href="{% url 'group_detail' group.slug %}">{{ group.name }}</a></li>
+        <li><a href="{% url 'project_detail' group.slug object.pk %}">{{ object.title }}</a></li>
+        <li>Delete</li>
+    </ol>
+</nav>
+
+<div class="content-narrow">
+    <h1>Delete {{ object.title }}</h1>
+    <div class="empty-state">
+        <h2>This cannot be undone</h2>
+        <p>Deleting this project permanently removes its notes, resources, assignments, and project details.</p>
+        <dl class="detail-list">
+            <div>
+                <dt>Group</dt>
+                <dd>{{ group.name }}</dd>
+            </div>
+            <div>
+                <dt>Notes</dt>
+                <dd>{{ note_count }}</dd>
+            </div>
+            <div>
+                <dt>Resources</dt>
+                <dd>{{ resource_count }}</dd>
+            </div>
+        </dl>
+    </div>
+
+    <form method="post" action="{% url 'project_delete' group.slug object.pk %}" class="form-stack">
+        {% csrf_token %}
+        <div class="action-row">
+            <button type="submit" class="button button--danger">Delete {{ object.title }}</button>
+            <a class="button button--secondary" href="{% url 'project_detail' group.slug object.pk %}">Keep {{ object.title }}</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -65,6 +65,7 @@ The project is in active development. The current app is a Django application wi
 - Archive and restore projects without deleting notes, assignments, or project history.
 - Archived projects are hidden from active project and assignment lists by default.
 - Download a Markdown export of a project's summary, links, resources, assignments, and notes.
+- Delete projects through a confirmation page when permitted.
 
 ### Project Notes
 
@@ -89,7 +90,7 @@ The project is in active development. The current app is a Django application wi
 The following areas are not complete yet:
 
 - Production-ready authentication provider integrations beyond the local development provider.
-- More complete project lifecycle controls, such as project deletion.
+- More complete project lifecycle controls, such as richer export formats and retention options.
 - More complete notifications for project changes, notes, invites, and membership changes.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
 - More detailed permissions for admins, editors, writers, and talent.

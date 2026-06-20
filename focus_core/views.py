@@ -63,6 +63,10 @@ def user_can_archive_project(user, project):
     return membership.role in {Membership.Role.OWNER, Membership.Role.ADMIN} or project.created_by_id == user.pk
 
 
+def user_can_delete_project(user, project):
+    return user_can_archive_project(user, project)
+
+
 def user_can_remove_project_resource(user, resource):
     membership = user_group_membership(user, resource.project.group)
     if not membership:
@@ -1030,6 +1034,7 @@ class ProjectDetailView(LoginRequiredMixin, DetailView):
         context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
         context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
+        context["can_delete_project"] = user_can_delete_project(self.request.user, self.object)
         return context
 
 
@@ -1085,6 +1090,7 @@ class ProjectNoteCreateView(LoginRequiredMixin, View):
             "resource_rows": project_resource_rows(request.user, project),
             "notes": project.notes.select_related("author"),
             "can_archive_project": user_can_archive_project(request.user, project),
+            "can_delete_project": user_can_delete_project(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
 
@@ -1126,6 +1132,7 @@ class ProjectResourceCreateView(LoginRequiredMixin, View):
             "resource_rows": project_resource_rows(request.user, project),
             "notes": project.notes.select_related("author"),
             "can_archive_project": user_can_archive_project(request.user, project),
+            "can_delete_project": user_can_delete_project(request.user, project),
         }
         return render(request, "focus_core/project_detail.html", context)
 
@@ -1204,6 +1211,42 @@ class ProjectRestoreView(LoginRequiredMixin, View):
         return redirect("project_detail", group_slug=project.group.slug, pk=project.pk)
 
 
+class ProjectDeleteView(LoginRequiredMixin, View):
+    def get_project(self):
+        return get_object_or_404(
+            VideoProject.objects.filter(
+                group__slug=self.kwargs["group_slug"],
+                group__members__user=self.request.user,
+            ).select_related("group", "created_by"),
+            pk=self.kwargs["pk"],
+        )
+
+    def get_context_data(self, project):
+        return {
+            "object": project,
+            "group": project.group,
+            "note_count": project.notes.count(),
+            "resource_count": project.resources.count(),
+        }
+
+    def get(self, request, *args, **kwargs):
+        project = self.get_project()
+        if not user_can_delete_project(request.user, project):
+            raise PermissionDenied("Only the project creator, group owners, or admins can delete projects.")
+        return render(request, "focus_core/project_confirm_delete.html", self.get_context_data(project))
+
+    def post(self, request, *args, **kwargs):
+        project = self.get_project()
+        if not user_can_delete_project(request.user, project):
+            raise PermissionDenied("Only the project creator, group owners, or admins can delete projects.")
+
+        group = project.group
+        title = project.title
+        project.delete()
+        messages.success(request, f"Deleted {title}.")
+        return redirect("group_detail", slug=group.slug)
+
+
 class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
     model = VideoProject
     form_class = ProjectStatusForm
@@ -1244,6 +1287,7 @@ class ProjectStatusUpdateView(LoginRequiredMixin, UpdateView):
         context["resource_rows"] = project_resource_rows(self.request.user, self.object)
         context["notes"] = self.object.notes.select_related("author")
         context["can_archive_project"] = user_can_archive_project(self.request.user, self.object)
+        context["can_delete_project"] = user_can_delete_project(self.request.user, self.object)
         return context
 
     def get_success_url(self):

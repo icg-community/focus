@@ -142,6 +142,29 @@ class ProductionFlowTests(TestCase):
         self.assertNotContains(response, "notifications.js")
         self.assertNotContains(response, "notification-announcer")
 
+    def test_status_page_shows_public_status_tables(self):
+        response = self.client.get(reverse("status"))
+
+        self.assertContains(response, "Current public status signals for FOCUS")
+        self.assertContains(response, "Production readiness checklist")
+        self.assertContains(response, "Application version")
+        self.assertContains(response, "Local development configuration")
+        self.assertContains(response, "Production settings")
+        self.assertContains(response, "Needs setup")
+        self.assertContains(response, reverse("status_health"))
+        self.assertContains(response, 'scope="col"')
+        self.assertContains(response, 'scope="row"')
+
+    def test_status_health_endpoint_reports_public_health(self):
+        response = self.client.get(reverse("status_health"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["database"], "ok")
+        self.assertIn("version", data)
+        self.assertFalse(data["production_ready"])
+
     def test_signed_out_brand_points_to_public_about_page(self):
         response = self.client.get(reverse("privacy"))
 

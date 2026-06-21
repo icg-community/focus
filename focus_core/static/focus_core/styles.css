@@ -360,6 +360,16 @@ h3 {
     text-decoration: underline;
 }
 
+.status-marker {
+    display: inline-block;
+    border: 1px solid var(--border);
+    border-radius: 0.375rem;
+    padding: 0.2rem 0.45rem;
+    background: #eef7ee;
+    color: var(--text);
+    font-weight: 700;
+}
+
 .table-wrap {
     overflow-x: auto;
 }
@@ -601,7 +611,8 @@ textarea.field-control {
     .filter-link,
     .item-card,
     .empty-state,
-    .error-summary {
+    .error-summary,
+    .status-marker {
         border: 2px solid CanvasText;
     }
 }

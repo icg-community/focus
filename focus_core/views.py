@@ -1,5 +1,6 @@
 import json
 import secrets
+from importlib.metadata import PackageNotFoundError, version
 
 from django import forms
 from django.conf import settings
@@ -7,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -42,6 +43,23 @@ PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
 PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY = "passkey_authentication_next"
 
 
+def app_version():
+    try:
+        return version("focus")
+    except PackageNotFoundError:
+        return "development"
+
+
+def production_settings_ready():
+    return (
+        not settings.DEBUG
+        and bool(settings.ALLOWED_HOSTS)
+        and getattr(settings, "SESSION_COOKIE_SECURE", False)
+        and getattr(settings, "CSRF_COOKIE_SECURE", False)
+        and getattr(settings, "SECURE_SSL_REDIRECT", False)
+    )
+
+
 class AboutView(TemplateView):
     template_name = "focus_core/about.html"
 
@@ -56,6 +74,85 @@ class AccessibilityView(TemplateView):
 
 class StatusView(TemplateView):
     template_name = "focus_core/status.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        production_ready = production_settings_ready()
+        context["status_summary"] = [
+            {
+                "label": "Application version",
+                "value": app_version(),
+                "status": "Published",
+            },
+            {
+                "label": "Service status",
+                "value": "Available",
+                "status": "Operational",
+            },
+            {
+                "label": "Deployment mode",
+                "value": "Production configuration" if production_ready else "Local development configuration",
+                "status": "Ready" if production_ready else "Needs production setup",
+            },
+            {
+                "label": "Authentication providers",
+                "value": "Development sign-in, passkeys, and backup keys are implemented",
+                "status": "Provider integrations still needed",
+            },
+            {
+                "label": "Accessibility evidence",
+                "value": "Template checks and browser checks are running during development",
+                "status": "Manual assistive technology testing still needed",
+            },
+        ]
+        context["readiness_items"] = [
+            {
+                "area": "Core group and project workflows",
+                "status": "In progress",
+                "detail": "Groups, members, invitations, projects, resources, notes, lifecycle controls, and notifications are implemented.",
+            },
+            {
+                "area": "Production authentication",
+                "status": "Needs setup",
+                "detail": "Real linked-account providers still need production integration beyond local development sign-in.",
+            },
+            {
+                "area": "Production settings",
+                "status": "Needs setup",
+                "detail": "Environment secrets, allowed hosts, secure cookies, HTTPS redirects, and deployment settings still need to be configured.",
+            },
+            {
+                "area": "Backups and retention",
+                "status": "Needs decision",
+                "detail": "Backup, restore, retention, and operational recovery policies still need documented decisions.",
+            },
+            {
+                "area": "Accessibility testing",
+                "status": "In progress",
+                "detail": "Automated checks are useful, but broader NVDA, JAWS, Narrator, VoiceOver, zoom, and high contrast testing still needs to happen.",
+            },
+        ]
+        return context
+
+
+class StatusHealthView(View):
+    def get(self, request, *args, **kwargs):
+        database_ok = True
+        try:
+            connection.ensure_connection()
+        except Exception:
+            database_ok = False
+
+        response_status = 200 if database_ok else 503
+        return JsonResponse(
+            {
+                "status": "ok" if database_ok else "degraded",
+                "version": app_version(),
+                "database": "ok" if database_ok else "unavailable",
+                "production_ready": production_settings_ready(),
+            },
+            status=response_status,
+        )
 
 
 def unique_group_slug(name):

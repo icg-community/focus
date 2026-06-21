@@ -18,6 +18,28 @@
         settings and external authentication provider integrations are still unfinished.
     </p>
 
+    <div class="table-wrap">
+        <table>
+            <caption>Current public status signals for FOCUS</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Signal</th>
+                    <th scope="col">Current value</th>
+                    <th scope="col">Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in status_summary %}
+                    <tr>
+                        <th scope="row">{{ row.label }}</th>
+                        <td>{{ row.value }}</td>
+                        <td><span class="status-marker">{{ row.status }}</span></td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
     <h2>Recent implementation work</h2>
     <ul>
         <li>Passkey sign-in, backup keys, and account safety guardrails.</li>
@@ -28,12 +50,33 @@
     </ul>
 
     <h2>Production readiness still needed</h2>
-    <ul>
-        <li>Provider integrations for real sign-in anchors beyond local development.</li>
-        <li>Environment-based secrets, allowed hosts, secure cookies, and deployment documentation.</li>
-        <li>Backups, retention decisions, and operational recovery notes.</li>
-        <li>Automated accessibility checks and broader manual assistive technology testing.</li>
-        <li>Contributor workflow notes for issue triage, pull requests, reviews, and releases.</li>
-    </ul>
+    <div class="table-wrap">
+        <table>
+            <caption>Production readiness checklist</caption>
+            <thead>
+                <tr>
+                    <th scope="col">Area</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">What remains</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in readiness_items %}
+                    <tr>
+                        <th scope="row">{{ item.area }}</th>
+                        <td><span class="status-marker">{{ item.status }}</span></td>
+                        <td>{{ item.detail }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <h2>Health check</h2>
+    <p>
+        Deployment monitors can request the <a href="{% url 'status_health' %}">FOCUS health check</a>.
+        It returns a small JSON response with the app version, service status, database reachability,
+        and whether production security settings appear to be enabled.
+    </p>
 </article>
 {% endblock %}

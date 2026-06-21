@@ -14,7 +14,14 @@
         </p>
     </div>
 
-    <form class="form-stack speech-tool" id="quick-speech-form" data-star-available="false">
+    <form
+        class="form-stack speech-tool"
+        id="quick-speech-form"
+        data-star-configured="{% if star_configured %}true{% else %}false{% endif %}"
+        data-star-voices-url="{% url 'quick_speech_star_voices' %}"
+        data-star-generate-url="{% url 'quick_speech_star_generate' %}"
+    >
+        {% csrf_token %}
         <section class="section-block content-narrow">
             <h2 id="speech-input-heading">Speech text</h2>
             <div class="field-group">
@@ -64,11 +71,11 @@
                     <option value="star" disabled>STAR audio generation is not configured yet</option>
                 </select>
                 <p id="voice-source-help" class="field-help">
-                    Browser voices stay on this device for preview. STAR generation will be used later for downloadable audio.
+                    Browser voices stay on this device for preview. STAR generation sends text to the configured relay and returns temporary downloadable audio.
                 </p>
             </div>
 
-            <div class="field-group">
+            <div class="field-group" id="browser-voice-group">
                 <label for="browser-voice">Browser voice</label>
                 <select id="browser-voice" class="field-control" aria-describedby="browser-voice-help">
                     <option value="">Use the browser default voice</option>
@@ -78,8 +85,18 @@
                 </p>
             </div>
 
+            <div class="field-group" id="star-voice-group" hidden>
+                <label for="star-voice">STAR voice</label>
+                <select id="star-voice" class="field-control" aria-describedby="star-voice-help">
+                    <option value="">STAR voices are loading</option>
+                </select>
+                <p id="star-voice-help" class="field-help">
+                    Voice names come from the configured STAR relay. Generated audio is returned to this page for playback and download.
+                </p>
+            </div>
+
             <div class="action-row">
-                <button type="submit" class="button">Prepare speech preview</button>
+                <button type="submit" class="button" id="speech-primary-action">Prepare speech preview</button>
                 <button type="button" class="button button--secondary" id="stop-speech">Stop speaking</button>
             </div>
             <p id="speech-visible-status" class="copy-status"></p>
@@ -93,9 +110,9 @@
     </noscript>
 
     <section class="section-block">
-        <h2 id="speech-preview-heading">Prepared previews</h2>
+        <h2 id="speech-preview-heading">Prepared speech</h2>
         <div id="speech-empty-state" class="empty-state">
-            <p>No speech previews prepared yet.</p>
+            <p>No speech has been prepared yet.</p>
         </div>
         <ol id="speech-preview-list" class="speech-preview-list" hidden></ol>
     </section>
@@ -105,7 +122,7 @@
         <ul>
             <li>Browser voice preview is handled by your browser and device.</li>
             <li>Text is not saved to your FOCUS account from this page.</li>
-            <li>Future STAR audio generation will clearly say when text is sent to a configured speech relay.</li>
+            <li>STAR generation sends text to the configured relay only after you choose a STAR voice and generate audio.</li>
         </ul>
     </section>
 

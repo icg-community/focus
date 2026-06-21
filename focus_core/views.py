@@ -1,6 +1,10 @@
+import asyncio
+import base64
 import json
+import re
 import secrets
 from importlib.metadata import PackageNotFoundError, version
+from urllib.parse import urlparse
 
 from django import forms
 from django.conf import settings
@@ -41,6 +45,9 @@ PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY = "passkey_authentication_challenge
 PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY = "passkey_authentication_rp_id"
 PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
 PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY = "passkey_authentication_next"
+QUICK_SPEECH_MAX_ITEMS = 20
+QUICK_SPEECH_MAX_ITEM_LENGTH = 1000
+QUICK_SPEECH_MAX_TOTAL_LENGTH = 5000
 
 
 def app_version():
@@ -60,6 +67,143 @@ def production_settings_ready():
     )
 
 
+def star_relay_url():
+    return getattr(settings, "FOCUS_STAR_RELAY_URL", "").strip()
+
+
+def star_timeout_seconds():
+    return max(float(getattr(settings, "FOCUS_STAR_TIMEOUT_SECONDS", 5)), 1.0)
+
+
+def validate_star_relay_url(relay_url):
+    parsed = urlparse(relay_url)
+    return parsed.scheme in {"ws", "wss"} and bool(parsed.netloc)
+
+
+def normalize_star_line(text):
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def clean_audio_extension(extension):
+    extension = re.sub(r"[^a-zA-Z0-9]", "", str(extension or "wav")).lower()
+    return extension or "wav"
+
+
+def parse_star_audio_message(message):
+    if not isinstance(message, bytes) or len(message) < 2:
+        return None
+
+    metadata_length = int.from_bytes(message[:2], "little")
+    metadata_bytes = message[2 : 2 + metadata_length]
+    audio = message[2 + metadata_length :]
+    if not audio:
+        return None
+
+    metadata_text = metadata_bytes.decode("utf-8", errors="replace")
+    try:
+        metadata = json.loads(metadata_text)
+    except json.JSONDecodeError:
+        metadata = {"id": metadata_text, "extension": "wav"}
+
+    request_id = str(metadata.get("id", ""))
+    try:
+        order = int(request_id.split("_")[-1])
+    except ValueError:
+        order = 0
+
+    extension = clean_audio_extension(metadata.get("extension", "wav"))
+    return {
+        "id": request_id,
+        "order": order,
+        "extension": extension,
+        "content_type": f"audio/{'mpeg' if extension == 'mp3' else extension}",
+        "audio_base64": base64.b64encode(audio).decode("ascii"),
+    }
+
+
+async def fetch_star_voice_names(relay_url):
+    import websockets
+
+    timeout = star_timeout_seconds()
+    payload = {"user": getattr(settings, "FOCUS_STAR_CLIENT_REVISION", 4)}
+    async with websockets.connect(
+        relay_url,
+        open_timeout=timeout,
+        close_timeout=timeout,
+        max_size=1024 * 1024,
+    ) as websocket:
+        await asyncio.wait_for(websocket.send(json.dumps(payload)), timeout=timeout)
+        message = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+
+    if isinstance(message, bytes):
+        message = message.decode("utf-8")
+
+    data = json.loads(message)
+    voices = data.get("voices", [])
+    if not isinstance(voices, list):
+        return []
+    return sorted(str(voice) for voice in voices if str(voice).strip())
+
+
+async def fetch_star_audio_clips(relay_url, voice, items):
+    import websockets
+
+    timeout = star_timeout_seconds()
+    request_lines = [
+        f"{voice}: {normalize_star_line(item)}"
+        for item in items
+        if normalize_star_line(item)
+    ]
+    payload = {
+        "user": getattr(settings, "FOCUS_STAR_CLIENT_REVISION", 4),
+        "request": request_lines,
+    }
+    clips = []
+
+    async with websockets.connect(
+        relay_url,
+        open_timeout=timeout,
+        close_timeout=timeout,
+        max_size=10 * 1024 * 1024,
+    ) as websocket:
+        await asyncio.wait_for(websocket.send(json.dumps(payload)), timeout=timeout)
+        while len(clips) < len(request_lines):
+            message = await asyncio.wait_for(websocket.recv(), timeout=timeout)
+            if isinstance(message, str):
+                data = json.loads(message)
+                if data.get("abort"):
+                    raise ValueError(data.get("status") or "STAR audio generation failed.")
+                continue
+
+            clip = parse_star_audio_message(message)
+            if clip:
+                clips.append(clip)
+
+    return sorted(clips, key=lambda clip: clip["order"])
+
+
+def validate_quick_speech_payload(payload):
+    voice = str(payload.get("voice", "")).strip()
+    items = payload.get("items", [])
+    if not voice:
+        raise ValidationError("Choose a STAR voice before generating audio.")
+    if not isinstance(items, list):
+        raise ValidationError("Speech text must be sent as a list of items.")
+
+    normalized_items = [normalize_star_line(item) for item in items]
+    normalized_items = [item for item in normalized_items if item]
+    if not normalized_items:
+        raise ValidationError("Enter text before generating audio.")
+    if len(normalized_items) > QUICK_SPEECH_MAX_ITEMS:
+        raise ValidationError(f"Generate {QUICK_SPEECH_MAX_ITEMS} items or fewer at a time.")
+    if sum(len(item) for item in normalized_items) > QUICK_SPEECH_MAX_TOTAL_LENGTH:
+        raise ValidationError("Shorten the speech text before generating audio.")
+    if any(len(item) > QUICK_SPEECH_MAX_ITEM_LENGTH for item in normalized_items):
+        raise ValidationError(f"Keep each speech item to {QUICK_SPEECH_MAX_ITEM_LENGTH} characters or fewer.")
+
+    return voice, normalized_items
+
+
 class AboutView(TemplateView):
     template_name = "focus_core/about.html"
 
@@ -74,6 +218,110 @@ class AccessibilityView(TemplateView):
 
 class QuickSpeechView(TemplateView):
     template_name = "focus_core/quick_speech.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["star_configured"] = validate_star_relay_url(star_relay_url())
+        return context
+
+
+class QuickSpeechStarVoicesView(View):
+    def get(self, request, *args, **kwargs):
+        relay_url = star_relay_url()
+        if not relay_url:
+            return JsonResponse(
+                {
+                    "configured": False,
+                    "voices": [],
+                    "message": "STAR audio generation is not configured yet.",
+                }
+            )
+
+        if not validate_star_relay_url(relay_url):
+            return JsonResponse(
+                {
+                    "configured": False,
+                    "voices": [],
+                    "message": "The configured STAR relay URL must start with ws:// or wss://.",
+                },
+                status=503,
+            )
+
+        try:
+            voices = asyncio.run(fetch_star_voice_names(relay_url))
+        except Exception:
+            return JsonResponse(
+                {
+                    "configured": True,
+                    "voices": [],
+                    "message": "STAR voices could not be loaded from the configured relay.",
+                },
+                status=503,
+            )
+
+        return JsonResponse(
+            {
+                "configured": True,
+                "voices": voices,
+                "message": f"{len(voices)} STAR voice{'s' if len(voices) != 1 else ''} available.",
+            }
+        )
+
+
+class QuickSpeechStarGenerateView(View):
+    def post(self, request, *args, **kwargs):
+        relay_url = star_relay_url()
+        if not relay_url or not validate_star_relay_url(relay_url):
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "STAR audio generation is not configured yet.",
+                },
+                status=503,
+            )
+
+        try:
+            payload = json.loads(request.body.decode("utf-8"))
+            voice, items = validate_quick_speech_payload(payload)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValidationError) as error:
+            message = "Speech generation details were not valid."
+            if isinstance(error, ValidationError):
+                message = " ".join(error.messages)
+            return JsonResponse({"ok": False, "error": message}, status=400)
+
+        try:
+            clips = asyncio.run(fetch_star_audio_clips(relay_url, voice, items))
+        except Exception:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "STAR audio could not be generated from the configured relay.",
+                },
+                status=503,
+            )
+
+        if not clips:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "error": "STAR did not return any audio.",
+                },
+                status=503,
+            )
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "clips": [
+                    {
+                        **clip,
+                        "filename": f"focus-speech-{index:03d}.{clip['extension']}",
+                        "text": items[index - 1] if index - 1 < len(items) else "",
+                    }
+                    for index, clip in enumerate(clips, start=1)
+                ],
+            }
+        )
 
 
 class StatusView(TemplateView):

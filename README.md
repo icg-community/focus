@@ -107,6 +107,7 @@ The project is in active development. The current app is a Django application wi
 - Public quick speech page with browser voice preview.
 - Text edit field and plain text or Markdown file loading for quick speech drafts.
 - Optional line splitting so each non-empty line can be prepared as a separate browser speech preview.
+- Optional STAR relay integration for configured deployments, including STAR voice discovery and temporary downloadable audio clips.
 
 ## Planned Functionality
 
@@ -116,7 +117,7 @@ The following areas are not complete yet:
 - More complete project lifecycle controls, such as richer export formats and retention options.
 - More detailed notification preferences.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
-- STAR-backed speech generation for downloadable audio files.
+- Saved project assets for generated speech clips.
 - More detailed per-assignment permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
 - Automated accessibility checks in continuous integration.
@@ -129,6 +130,7 @@ The following areas are not complete yet:
 - Django 5
 - SQLite for local development
 - WebAuthn passkeys through the `webauthn` Python package
+- Optional STAR relay support through the `websockets` Python package
 
 ## Local Development Setup
 
@@ -172,6 +174,16 @@ python manage.py runserver
 Open the [local development server](http://127.0.0.1:8000/) in your browser.
 
 In local development, `DEBUG=True` enables the development sign-in page. Use it to create a local pseudonymous session without an email address or password.
+
+### Optional STAR speech relay
+
+Quick speech can use browser voices without extra setup. To enable STAR-backed audio generation, configure:
+
+```python
+FOCUS_STAR_RELAY_URL = "wss://your-star-relay.example"
+```
+
+FOCUS does not expose the relay URL to the browser. It asks the relay for available voice names and sends text to the relay only when a user chooses STAR generation.
 
 ## Running Tests
 

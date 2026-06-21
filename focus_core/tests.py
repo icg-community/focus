@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import timedelta
 from types import SimpleNamespace
@@ -158,6 +159,99 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, 'role="alert"')
         self.assertContains(response, "quick_speech.js")
         self.assertNotContains(response, "notifications.js")
+        self.assertContains(response, reverse("quick_speech_star_voices"))
+        self.assertContains(response, reverse("quick_speech_star_generate"))
+
+    @override_settings(FOCUS_STAR_RELAY_URL="wss://star.example.test/relay")
+    def test_quick_speech_page_marks_star_as_configured(self):
+        response = self.client.get(reverse("quick_speech"))
+
+        self.assertContains(response, 'data-star-configured="true"')
+
+    def test_star_voice_endpoint_reports_unconfigured_state(self):
+        response = self.client.get(reverse("quick_speech_star_voices"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertFalse(data["configured"])
+        self.assertEqual(data["voices"], [])
+        self.assertEqual(data["message"], "STAR audio generation is not configured yet.")
+
+    @override_settings(FOCUS_STAR_RELAY_URL="https://example.test/not-websocket")
+    def test_star_voice_endpoint_rejects_non_websocket_relay_url(self):
+        response = self.client.get(reverse("quick_speech_star_voices"))
+
+        self.assertEqual(response.status_code, 503)
+        data = response.json()
+        self.assertFalse(data["configured"])
+        self.assertEqual(data["voices"], [])
+        self.assertIn("ws:// or wss://", data["message"])
+
+    @override_settings(FOCUS_STAR_RELAY_URL="wss://star.example.test/relay")
+    def test_star_voice_endpoint_returns_configured_voice_names(self):
+        async def fake_fetch_star_voice_names(relay_url):
+            self.assertEqual(relay_url, "wss://star.example.test/relay")
+            return ["Narrator", "Announcer"]
+
+        with patch("focus_core.views.fetch_star_voice_names", fake_fetch_star_voice_names):
+            response = self.client.get(reverse("quick_speech_star_voices"))
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["configured"])
+        self.assertEqual(data["voices"], ["Narrator", "Announcer"])
+        self.assertEqual(data["message"], "2 STAR voices available.")
+
+    def test_star_generate_endpoint_reports_unconfigured_state(self):
+        response = self.client.post(
+            reverse("quick_speech_star_generate"),
+            data=json.dumps({"voice": "Narrator", "items": ["Opening line"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(response.json()["ok"])
+
+    @override_settings(FOCUS_STAR_RELAY_URL="wss://star.example.test/relay")
+    def test_star_generate_endpoint_returns_audio_clips(self):
+        async def fake_fetch_star_audio_clips(relay_url, voice, items):
+            self.assertEqual(relay_url, "wss://star.example.test/relay")
+            self.assertEqual(voice, "Narrator")
+            self.assertEqual(items, ["Opening line"])
+            return [
+                {
+                    "id": "1_0",
+                    "order": 0,
+                    "extension": "wav",
+                    "content_type": "audio/wav",
+                    "audio_base64": base64.b64encode(b"audio").decode("ascii"),
+                }
+            ]
+
+        with patch("focus_core.views.fetch_star_audio_clips", fake_fetch_star_audio_clips):
+            response = self.client.post(
+                reverse("quick_speech_star_generate"),
+                data=json.dumps({"voice": "Narrator", "items": ["Opening line"]}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["clips"][0]["filename"], "focus-speech-001.wav")
+        self.assertEqual(data["clips"][0]["text"], "Opening line")
+        self.assertEqual(data["clips"][0]["audio_base64"], base64.b64encode(b"audio").decode("ascii"))
+
+    @override_settings(FOCUS_STAR_RELAY_URL="wss://star.example.test/relay")
+    def test_star_generate_endpoint_validates_text_limits(self):
+        response = self.client.post(
+            reverse("quick_speech_star_generate"),
+            data=json.dumps({"voice": "Narrator", "items": ["Line"] * 21}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("20 items or fewer", response.json()["error"])
 
     def test_status_page_shows_public_status_tables(self):
         response = self.client.get(reverse("status"))

@@ -72,6 +72,10 @@ class AccessibilityView(TemplateView):
     template_name = "focus_core/accessibility.html"
 
 
+class QuickSpeechView(TemplateView):
+    template_name = "focus_core/quick_speech.html"
+
+
 class StatusView(TemplateView):
     template_name = "focus_core/status.html"
 

@@ -1,0 +1,119 @@
+{% extends "focus_core/base.html" %}
+{% load static %}
+
+{% block title %}Quick speech{% endblock %}
+
+{% block content %}
+<article class="tool-page">
+    <div class="content-narrow">
+        <p class="eyebrow">Creator tool</p>
+        <h1>Quick speech</h1>
+        <p>
+            Create quick spoken previews for announcements, corrections, placeholders,
+            and voice-line drafts.
+        </p>
+    </div>
+
+    <form class="form-stack speech-tool" id="quick-speech-form" data-star-available="false">
+        <section class="section-block content-narrow">
+            <h2 id="speech-input-heading">Speech text</h2>
+            <div class="field-group">
+                <label for="speech-text">Text to speak</label>
+                <textarea
+                    id="speech-text"
+                    class="field-control"
+                    rows="8"
+                    aria-describedby="speech-text-help"
+                ></textarea>
+                <p id="speech-text-help" class="field-help">
+                    Enter the text here, or load a plain text or Markdown file below.
+                </p>
+            </div>
+
+            <div class="field-group">
+                <label for="speech-file">Text file</label>
+                <input
+                    id="speech-file"
+                    class="field-control"
+                    type="file"
+                    accept=".txt,.md,text/plain,text/markdown"
+                    aria-describedby="speech-file-help"
+                >
+                <p id="speech-file-help" class="field-help">
+                    Loading a file replaces the text currently in the edit field.
+                </p>
+            </div>
+        </section>
+
+        <section class="section-block content-narrow">
+            <h2 id="speech-options-heading">Speech options</h2>
+            <fieldset class="checkbox-group">
+                <legend>Output grouping</legend>
+                <div>
+                    <label>
+                        <input id="split-lines" class="checkbox-input" type="checkbox">
+                        Use each non-empty line as a separate item
+                    </label>
+                </div>
+            </fieldset>
+
+            <div class="field-group">
+                <label for="voice-source">Voice source</label>
+                <select id="voice-source" class="field-control" aria-describedby="voice-source-help">
+                    <option value="browser">Browser voices for preview</option>
+                    <option value="star" disabled>STAR audio generation is not configured yet</option>
+                </select>
+                <p id="voice-source-help" class="field-help">
+                    Browser voices stay on this device for preview. STAR generation will be used later for downloadable audio.
+                </p>
+            </div>
+
+            <div class="field-group">
+                <label for="browser-voice">Browser voice</label>
+                <select id="browser-voice" class="field-control" aria-describedby="browser-voice-help">
+                    <option value="">Use the browser default voice</option>
+                </select>
+                <p id="browser-voice-help" class="field-help">
+                    The voices available here depend on this browser and device.
+                </p>
+            </div>
+
+            <div class="action-row">
+                <button type="submit" class="button">Prepare speech preview</button>
+                <button type="button" class="button button--secondary" id="stop-speech">Stop speaking</button>
+            </div>
+            <p id="speech-visible-status" class="copy-status"></p>
+        </section>
+    </form>
+
+    <noscript>
+        <div class="empty-state content-narrow">
+            <p>Quick speech preview needs JavaScript because browser voices are controlled by the browser.</p>
+        </div>
+    </noscript>
+
+    <section class="section-block">
+        <h2 id="speech-preview-heading">Prepared previews</h2>
+        <div id="speech-empty-state" class="empty-state">
+            <p>No speech previews prepared yet.</p>
+        </div>
+        <ol id="speech-preview-list" class="speech-preview-list" hidden></ol>
+    </section>
+
+    <section class="section-block content-narrow">
+        <h2 id="speech-privacy-heading">Privacy notes</h2>
+        <ul>
+            <li>Browser voice preview is handled by your browser and device.</li>
+            <li>Text is not saved to your FOCUS account from this page.</li>
+            <li>Future STAR audio generation will clearly say when text is sent to a configured speech relay.</li>
+        </ul>
+    </section>
+
+    <div id="speech-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="speech-error" class="visually-hidden" role="alert" aria-live="assertive" aria-atomic="true"></div>
+</article>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'focus_core/quick_speech.js' %}?v=1" defer></script>
+{% endblock %}

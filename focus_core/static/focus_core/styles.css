@@ -141,6 +141,11 @@ a:hover {
     margin-top: 0;
 }
 
+.tool-page {
+    display: grid;
+    gap: 1rem;
+}
+
 .page-heading {
     display: flex;
     align-items: start;
@@ -539,7 +544,8 @@ textarea.field-control {
 }
 
 .note-list,
-.resource-list {
+.resource-list,
+.speech-preview-list {
     display: grid;
     gap: 1rem;
     list-style: none;
@@ -548,7 +554,8 @@ textarea.field-control {
 }
 
 .note-item,
-.resource-item {
+.resource-item,
+.speech-preview-item {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 0.5rem;
@@ -560,9 +567,18 @@ textarea.field-control {
     margin: 0 0 0.25rem;
 }
 
+.speech-preview-item h3 {
+    margin-bottom: 0.25rem;
+}
+
 .note-item p,
-.resource-item p {
+.resource-item p,
+.speech-preview-item p {
     margin: 0.5rem 0 0;
+}
+
+.speech-preview-item .action-row {
+    margin-top: 0.75rem;
 }
 
 .recovery-code-list {
@@ -612,6 +628,7 @@ textarea.field-control {
     .item-card,
     .empty-state,
     .error-summary,
+    .speech-preview-item,
     .status-marker {
         border: 2px solid CanvasText;
     }

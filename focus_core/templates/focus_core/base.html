@@ -17,6 +17,7 @@
                     <ul class="nav-list">
                         <li><a href="{% url 'dashboard' %}">Dashboard</a></li>
                         <li><a href="{% url 'group_create' %}">New group</a></li>
+                        <li><a href="{% url 'quick_speech' %}">Quick speech</a></li>
                         <li>
                             <a id="notification-nav-link" href="{% url 'notifications' %}">
                                 Notifications{% if unread_notification_count %} ({{ unread_notification_count }} unread){% endif %}
@@ -52,6 +53,7 @@
                     <li><a href="{% url 'about' %}">About FOCUS</a></li>
                     <li><a href="{% url 'privacy' %}">Privacy</a></li>
                     <li><a href="{% url 'accessibility' %}">Accessibility</a></li>
+                    <li><a href="{% url 'quick_speech' %}">Quick speech</a></li>
                     <li><a href="{% url 'status' %}">Status and changelog</a></li>
                 </ul>
             </nav>
@@ -68,5 +70,6 @@
             data-initial-group-id="{{ latest_group_notification_id }}"
         ></script>
     {% endif %}
+    {% block scripts %}{% endblock %}
 </body>
 </html>

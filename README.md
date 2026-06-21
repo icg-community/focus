@@ -102,6 +102,12 @@ The project is in active development. The current app is a Django application wi
 - Accessibility page describing current accessibility work and testing still needed.
 - Status and changelog page with public status signals, a production-readiness checklist, and a health check endpoint.
 
+### Creator Tools
+
+- Public quick speech page with browser voice preview.
+- Text edit field and plain text or Markdown file loading for quick speech drafts.
+- Optional line splitting so each non-empty line can be prepared as a separate browser speech preview.
+
 ## Planned Functionality
 
 The following areas are not complete yet:
@@ -110,6 +116,7 @@ The following areas are not complete yet:
 - More complete project lifecycle controls, such as richer export formats and retention options.
 - More detailed notification preferences.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
+- STAR-backed speech generation for downloadable audio files.
 - More detailed per-assignment permissions for admins, editors, writers, and talent.
 - Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
 - Automated accessibility checks in continuous integration.

@@ -120,6 +120,7 @@ class ProductionFlowTests(TestCase):
             "about": "FOCUS is a privacy-first production management hub",
             "privacy": "FOCUS does not require a legal name",
             "accessibility": "WCAG 2.2 AA",
+            "quick_speech": "Quick speech",
             "status": "The app is not production-ready yet.",
         }
 
@@ -134,6 +135,7 @@ class ProductionFlowTests(TestCase):
                 self.assertContains(response, reverse("about"))
                 self.assertContains(response, reverse("privacy"))
                 self.assertContains(response, reverse("accessibility"))
+                self.assertContains(response, reverse("quick_speech"))
                 self.assertContains(response, reverse("status"))
 
     def test_public_trust_pages_do_not_load_authenticated_notification_script(self):
@@ -141,6 +143,21 @@ class ProductionFlowTests(TestCase):
 
         self.assertNotContains(response, "notifications.js")
         self.assertNotContains(response, "notification-announcer")
+
+    def test_quick_speech_page_has_accessible_public_tool_controls(self):
+        response = self.client.get(reverse("quick_speech"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Text to speak")
+        self.assertContains(response, 'id="speech-text"')
+        self.assertContains(response, 'id="speech-file"')
+        self.assertContains(response, 'type="file"')
+        self.assertContains(response, "Use each non-empty line as a separate item")
+        self.assertContains(response, 'id="browser-voice"')
+        self.assertContains(response, 'role="status"')
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, "quick_speech.js")
+        self.assertNotContains(response, "notifications.js")
 
     def test_status_page_shows_public_status_tables(self):
         response = self.client.get(reverse("status"))

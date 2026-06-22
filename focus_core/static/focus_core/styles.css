@@ -581,6 +581,10 @@ textarea.field-control {
     margin-top: 0.75rem;
 }
 
+.speech-export-actions {
+    margin-top: 1rem;
+}
+
 .recovery-code-list {
     display: grid;
     gap: 0.5rem;

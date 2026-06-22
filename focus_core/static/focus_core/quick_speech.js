@@ -27,11 +27,15 @@
     const stopSpeech = document.getElementById("stop-speech");
     const previewList = document.getElementById("speech-preview-list");
     const emptyState = document.getElementById("speech-empty-state");
+    const speechExportActions = document.getElementById("speech-export-actions");
+    const downloadSpeechText = document.getElementById("download-speech-text");
+    const downloadSpeechManifest = document.getElementById("download-speech-manifest");
     const visibleStatus = document.getElementById("speech-visible-status");
     const statusRegion = document.getElementById("speech-status");
     const errorRegion = document.getElementById("speech-error");
     const starOption = voiceSource.querySelector('option[value="star"]');
     const audioUrls = [];
+    const exportUrls = [];
 
     function setStatus(message) {
         visibleStatus.textContent = message;
@@ -51,6 +55,46 @@
         while (audioUrls.length) {
             URL.revokeObjectURL(audioUrls.pop());
         }
+    }
+
+    function releaseExportUrls() {
+        while (exportUrls.length) {
+            URL.revokeObjectURL(exportUrls.pop());
+        }
+    }
+
+    function updatePreparedExports(items, source) {
+        releaseExportUrls();
+        const preparedItems = items
+            .map((item, index) => ({
+                number: index + 1,
+                text: String(item.text || item),
+                audioFile: item.filename || "",
+            }))
+            .filter((item) => item.text.trim());
+
+        if (!preparedItems.length) {
+            speechExportActions.hidden = true;
+            downloadSpeechText.removeAttribute("href");
+            downloadSpeechManifest.removeAttribute("href");
+            return;
+        }
+
+        const textContent = preparedItems
+            .map((item) => `Item ${item.number}\n${item.text}`)
+            .join("\n\n");
+        const manifestContent = JSON.stringify({
+            createdAt: new Date().toISOString(),
+            source,
+            items: preparedItems,
+        }, null, 2);
+        const textUrl = URL.createObjectURL(new Blob([`${textContent}\n`], { type: "text/plain" }));
+        const manifestUrl = URL.createObjectURL(new Blob([`${manifestContent}\n`], { type: "application/json" }));
+
+        exportUrls.push(textUrl, manifestUrl);
+        downloadSpeechText.href = textUrl;
+        downloadSpeechManifest.href = manifestUrl;
+        speechExportActions.hidden = false;
     }
 
     function shortLabel(text) {
@@ -267,6 +311,7 @@
         const hasItems = items.length > 0;
         previewList.hidden = !hasItems;
         emptyState.hidden = hasItems;
+        updatePreparedExports(items, "browser-preview");
     }
 
     function renderAudioClips(clips) {
@@ -309,6 +354,7 @@
         const hasClips = clips.length > 0;
         previewList.hidden = !hasClips;
         emptyState.hidden = hasClips;
+        updatePreparedExports(clips, "star-audio");
     }
 
     function openStarSocket(socketUrl) {

@@ -118,6 +118,15 @@
         }
     }
 
+    async function copyTextToClipboard(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+            return;
+        }
+
+        copyTextWithFallback(text);
+    }
+
     async function copyPreparedTextToClipboard() {
         clearError();
         if (!preparedTextForCopy.trim()) {
@@ -126,14 +135,25 @@
         }
 
         try {
-            if (navigator.clipboard && window.isSecureContext) {
-                await navigator.clipboard.writeText(preparedTextForCopy);
-            } else {
-                copyTextWithFallback(preparedTextForCopy);
-            }
+            await copyTextToClipboard(preparedTextForCopy);
             setStatus("Prepared text copied to clipboard.");
         } catch (error) {
             setError(error.message || "Prepared text could not be copied.");
+        }
+    }
+
+    async function copyItemTextToClipboard(text, itemNumber) {
+        clearError();
+        if (!String(text || "").trim()) {
+            setError(`Item ${itemNumber} has no text to copy.`);
+            return;
+        }
+
+        try {
+            await copyTextToClipboard(text);
+            setStatus(`Item ${itemNumber} text copied to clipboard.`);
+        } catch (error) {
+            setError(error.message || `Item ${itemNumber} text could not be copied.`);
         }
     }
 
@@ -342,7 +362,16 @@
                 speak(item, itemNumber);
             });
 
-            actions.append(playButton);
+            const copyButton = document.createElement("button");
+            copyButton.type = "button";
+            copyButton.className = "button button--secondary";
+            copyButton.textContent = `Copy item ${itemNumber} text`;
+            copyButton.setAttribute("aria-label", `Copy item ${itemNumber} text: ${shortLabel(item)}`);
+            copyButton.addEventListener("click", function () {
+                copyItemTextToClipboard(item, itemNumber);
+            });
+
+            actions.append(playButton, copyButton);
             article.append(heading, text, actions);
             listItem.append(article);
             previewList.append(listItem);
@@ -385,7 +414,16 @@
             downloadLink.download = clip.filename || `focus-speech-${itemNumber}.wav`;
             downloadLink.textContent = `Download item ${itemNumber}`;
 
-            actions.append(downloadLink);
+            const copyButton = document.createElement("button");
+            copyButton.type = "button";
+            copyButton.className = "button button--secondary";
+            copyButton.textContent = `Copy item ${itemNumber} text`;
+            copyButton.setAttribute("aria-label", `Copy item ${itemNumber} text: ${shortLabel(clip.text || "")}`);
+            copyButton.addEventListener("click", function () {
+                copyItemTextToClipboard(clip.text || "", itemNumber);
+            });
+
+            actions.append(copyButton, downloadLink);
             article.append(heading, text, audio, actions);
             listItem.append(article);
             previewList.append(listItem);

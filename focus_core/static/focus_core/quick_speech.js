@@ -4,12 +4,23 @@
         return;
     }
 
+    const STAR_SOCKET_STORAGE_KEY = "focus.quickSpeech.starSocketUrl";
+    const STAR_CLIENT_REVISION = 4;
+    const STAR_TIMEOUT_MS = 8000;
+    const STAR_MAX_ITEMS = 20;
+    const STAR_MAX_ITEM_LENGTH = 1000;
+    const STAR_MAX_TOTAL_LENGTH = 5000;
+
     const speechText = document.getElementById("speech-text");
     const speechFile = document.getElementById("speech-file");
     const splitLines = document.getElementById("split-lines");
     const voiceSource = document.getElementById("voice-source");
     const browserVoiceGroup = document.getElementById("browser-voice-group");
     const browserVoice = document.getElementById("browser-voice");
+    const starSocketUrl = document.getElementById("star-socket-url");
+    const saveStarSettings = document.getElementById("save-star-settings");
+    const testStarConnection = document.getElementById("test-star-connection");
+    const forgetStarSettings = document.getElementById("forget-star-settings");
     const starVoiceGroup = document.getElementById("star-voice-group");
     const starVoice = document.getElementById("star-voice");
     const primaryAction = document.getElementById("speech-primary-action");
@@ -20,7 +31,6 @@
     const statusRegion = document.getElementById("speech-status");
     const errorRegion = document.getElementById("speech-error");
     const starOption = voiceSource.querySelector('option[value="star"]');
-    const csrfToken = form.querySelector("[name=csrfmiddlewaretoken]")?.value || "";
     const audioUrls = [];
 
     function setStatus(message) {
@@ -67,8 +77,94 @@
             .filter(Boolean);
     }
 
-    function starIsConfigured() {
-        return form.dataset.starConfigured === "true";
+    function normalizeStarLine(text) {
+        return String(text || "").replace(/\s+/g, " ").trim();
+    }
+
+    function validateStarItems(items) {
+        const normalizedItems = items.map(normalizeStarLine).filter(Boolean);
+        const totalLength = normalizedItems.reduce((total, item) => total + item.length, 0);
+
+        if (!normalizedItems.length) {
+            throw new Error("Enter text before generating audio.");
+        }
+        if (normalizedItems.length > STAR_MAX_ITEMS) {
+            throw new Error(`Generate ${STAR_MAX_ITEMS} items or fewer at a time.`);
+        }
+        if (totalLength > STAR_MAX_TOTAL_LENGTH) {
+            throw new Error("Shorten the speech text before generating audio.");
+        }
+        if (normalizedItems.some((item) => item.length > STAR_MAX_ITEM_LENGTH)) {
+            throw new Error(`Keep each speech item to ${STAR_MAX_ITEM_LENGTH} characters or fewer.`);
+        }
+
+        return normalizedItems;
+    }
+
+    function isLocalHost(hostname) {
+        return ["localhost", "127.0.0.1", "::1"].includes(hostname);
+    }
+
+    function validateStarSocketUrl(value) {
+        const trimmed = value.trim();
+        if (!trimmed) {
+            throw new Error("Enter a STAR socket address first.");
+        }
+
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(trimmed);
+        } catch (error) {
+            throw new Error("Enter a valid STAR socket address.");
+        }
+
+        if (!["ws:", "wss:"].includes(parsedUrl.protocol) || !parsedUrl.host) {
+            throw new Error("STAR socket addresses must start with ws:// or wss://.");
+        }
+
+        if (window.location.protocol === "https:" && parsedUrl.protocol === "ws:" && !isLocalHost(parsedUrl.hostname)) {
+            throw new Error("Hosted FOCUS pages need wss:// STAR sockets unless the address is localhost.");
+        }
+
+        return parsedUrl.toString();
+    }
+
+    function storedStarSocketUrl() {
+        try {
+            return localStorage.getItem(STAR_SOCKET_STORAGE_KEY) || "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    function saveStarSocketUrl(socketUrl) {
+        try {
+            localStorage.setItem(STAR_SOCKET_STORAGE_KEY, socketUrl);
+            return true;
+        } catch (error) {
+            setError("This browser could not save the STAR settings.");
+            return false;
+        }
+    }
+
+    function forgetStarSocketUrl() {
+        try {
+            localStorage.removeItem(STAR_SOCKET_STORAGE_KEY);
+            return true;
+        } catch (error) {
+            setError("This browser could not forget the STAR settings.");
+            return false;
+        }
+    }
+
+    function resetStarVoices(message) {
+        starVoice.replaceChildren(new Option(message, ""));
+        starOption.disabled = true;
+        starOption.textContent = "STAR audio generation needs a saved socket";
+        if (voiceSource.value === "star") {
+            voiceSource.value = "browser";
+        }
+        toggleVoiceSource();
     }
 
     function toggleVoiceSource() {
@@ -86,7 +182,7 @@
             return;
         }
 
-        const selectedVoice = browserVoice.value;
+        const selectedVoiceName = browserVoice.value;
         const voices = window.speechSynthesis.getVoices();
         browserVoice.replaceChildren(new Option("Use the browser default voice", ""));
 
@@ -95,8 +191,8 @@
             browserVoice.add(option);
         });
 
-        if (selectedVoice) {
-            browserVoice.value = selectedVoice;
+        if (selectedVoiceName) {
+            browserVoice.value = selectedVoiceName;
         }
     }
 
@@ -173,15 +269,6 @@
         emptyState.hidden = hasItems;
     }
 
-    function audioBlobFromBase64(audioBase64, contentType) {
-        const binary = atob(audioBase64);
-        const bytes = new Uint8Array(binary.length);
-        for (let index = 0; index < binary.length; index += 1) {
-            bytes[index] = binary.charCodeAt(index);
-        }
-        return new Blob([bytes], { type: contentType || "audio/wav" });
-    }
-
     function renderAudioClips(clips) {
         releaseAudioUrls();
         previewList.replaceChildren();
@@ -200,7 +287,7 @@
             const audio = document.createElement("audio");
             audio.controls = true;
             audio.setAttribute("aria-label", `Generated audio for item ${itemNumber}`);
-            const audioUrl = URL.createObjectURL(audioBlobFromBase64(clip.audio_base64, clip.content_type));
+            const audioUrl = URL.createObjectURL(clip.audioBlob);
             audioUrls.push(audioUrl);
             audio.src = audioUrl;
 
@@ -224,31 +311,162 @@
         emptyState.hidden = hasClips;
     }
 
-    async function loadStarVoices() {
-        if (!starIsConfigured()) {
-            starOption.disabled = true;
-            return;
-        }
+    function openStarSocket(socketUrl) {
+        return new Promise((resolve, reject) => {
+            let websocket;
+            const timeout = window.setTimeout(function () {
+                if (websocket) {
+                    websocket.close();
+                }
+                reject(new Error("STAR connection timed out."));
+            }, STAR_TIMEOUT_MS);
 
-        try {
-            const response = await fetch(form.dataset.starVoicesUrl);
-            const data = await response.json();
-            if (!response.ok || !data.configured || !data.voices.length) {
-                starOption.disabled = true;
-                starOption.textContent = data.message || "STAR voices are not available";
+            try {
+                websocket = new WebSocket(socketUrl);
+                websocket.binaryType = "arraybuffer";
+            } catch (error) {
+                window.clearTimeout(timeout);
+                reject(new Error("STAR connection could not be opened."));
                 return;
             }
 
+            websocket.addEventListener("open", function () {
+                window.clearTimeout(timeout);
+                resolve(websocket);
+            }, { once: true });
+            websocket.addEventListener("error", function () {
+                window.clearTimeout(timeout);
+                reject(new Error("STAR connection could not be opened."));
+            }, { once: true });
+        });
+    }
+
+    function receiveStarMessage(websocket) {
+        return new Promise((resolve, reject) => {
+            const timeout = window.setTimeout(cleanUpAndReject, STAR_TIMEOUT_MS);
+
+            function cleanUp() {
+                window.clearTimeout(timeout);
+                websocket.removeEventListener("message", onMessage);
+                websocket.removeEventListener("close", onClose);
+                websocket.removeEventListener("error", onError);
+            }
+
+            function cleanUpAndReject() {
+                cleanUp();
+                reject(new Error("STAR did not respond in time."));
+            }
+
+            function onMessage(event) {
+                cleanUp();
+                resolve(event.data);
+            }
+
+            function onClose() {
+                cleanUp();
+                reject(new Error("STAR connection closed before it finished."));
+            }
+
+            function onError() {
+                cleanUp();
+                reject(new Error("STAR connection failed."));
+            }
+
+            websocket.addEventListener("message", onMessage);
+            websocket.addEventListener("close", onClose);
+            websocket.addEventListener("error", onError);
+        });
+    }
+
+    async function dataAsText(data) {
+        if (typeof data === "string") {
+            return data;
+        }
+        if (data instanceof Blob) {
+            return data.text();
+        }
+        if (data instanceof ArrayBuffer) {
+            return new TextDecoder().decode(data);
+        }
+        return "";
+    }
+
+    async function dataAsArrayBuffer(data) {
+        if (data instanceof ArrayBuffer) {
+            return data;
+        }
+        if (data instanceof Blob) {
+            return data.arrayBuffer();
+        }
+        return null;
+    }
+
+    async function receiveStarJson(websocket) {
+        const data = await receiveStarMessage(websocket);
+        const text = await dataAsText(data);
+        return JSON.parse(text);
+    }
+
+    function cleanAudioExtension(extension) {
+        const cleaned = String(extension || "wav").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+        return cleaned || "wav";
+    }
+
+    function parseStarAudioMessage(buffer, fallbackOrder) {
+        if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 2) {
+            return null;
+        }
+
+        const metadataLength = new DataView(buffer).getUint16(0, true);
+        const metadataEnd = 2 + metadataLength;
+        if (metadataEnd >= buffer.byteLength) {
+            return null;
+        }
+
+        const metadataText = new TextDecoder().decode(buffer.slice(2, metadataEnd));
+        let metadata = { id: metadataText, extension: "wav" };
+        try {
+            metadata = JSON.parse(metadataText);
+        } catch (error) {
+            metadata = { id: metadataText, extension: "wav" };
+        }
+
+        const requestId = String(metadata.id || "");
+        const parsedOrder = Number.parseInt(requestId.split("_").pop(), 10);
+        const extension = cleanAudioExtension(metadata.extension);
+        const contentType = extension === "mp3" ? "audio/mpeg" : `audio/${extension}`;
+        return {
+            order: Number.isNaN(parsedOrder) ? fallbackOrder : parsedOrder,
+            extension,
+            audioBlob: new Blob([buffer.slice(metadataEnd)], { type: contentType }),
+        };
+    }
+
+    async function loadStarVoices(socketUrl) {
+        let websocket;
+        try {
+            websocket = await openStarSocket(socketUrl);
+            websocket.send(JSON.stringify({ user: STAR_CLIENT_REVISION }));
+            const data = await receiveStarJson(websocket);
+            const voices = Array.isArray(data.voices)
+                ? data.voices.map((voice) => String(voice).trim()).filter(Boolean).sort()
+                : [];
+
+            if (!voices.length) {
+                throw new Error("No STAR voices were returned.");
+            }
+
             starVoice.replaceChildren(new Option("Choose a STAR voice", ""));
-            data.voices.forEach((voiceName) => {
+            voices.forEach((voiceName) => {
                 starVoice.add(new Option(voiceName, voiceName));
             });
             starOption.disabled = false;
             starOption.textContent = "STAR voices for downloadable audio";
-            setStatus(data.message);
-        } catch (error) {
-            starOption.disabled = true;
-            starOption.textContent = "STAR voices could not be loaded";
+            return voices;
+        } finally {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
         }
     }
 
@@ -259,31 +477,58 @@
             return;
         }
 
-        primaryAction.disabled = true;
-        setStatus(`Generating ${items.length} audio ${items.length === 1 ? "file" : "files"} with STAR.`);
+        let normalizedItems;
+        let socketUrl;
         try {
-            const response = await fetch(form.dataset.starGenerateUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken,
-                },
-                body: JSON.stringify({
-                    voice: starVoice.value,
-                    items,
-                }),
-            });
-            const data = await response.json();
-            if (!response.ok || !data.ok) {
-                setError(data.error || "STAR audio could not be generated.");
-                return;
+            normalizedItems = validateStarItems(items);
+            socketUrl = validateStarSocketUrl(starSocketUrl.value || storedStarSocketUrl());
+        } catch (error) {
+            setError(error.message);
+            return;
+        }
+
+        const requestLines = normalizedItems.map((item) => `${starVoice.value}: ${item}`);
+        let websocket;
+        primaryAction.disabled = true;
+        setStatus(`Generating ${normalizedItems.length} audio ${normalizedItems.length === 1 ? "file" : "files"} with STAR.`);
+        try {
+            websocket = await openStarSocket(socketUrl);
+            websocket.send(JSON.stringify({
+                user: STAR_CLIENT_REVISION,
+                request: requestLines,
+            }));
+
+            const clips = [];
+            while (clips.length < requestLines.length) {
+                const message = await receiveStarMessage(websocket);
+                if (typeof message === "string") {
+                    const data = JSON.parse(message);
+                    if (data.abort) {
+                        throw new Error(data.status || "STAR audio generation failed.");
+                    }
+                    continue;
+                }
+
+                const buffer = await dataAsArrayBuffer(message);
+                const clip = parseStarAudioMessage(buffer, clips.length);
+                if (clip) {
+                    clips.push(clip);
+                }
             }
 
-            renderAudioClips(data.clips || []);
-            setStatus(`${data.clips.length} STAR audio ${data.clips.length === 1 ? "file is" : "files are"} ready.`);
+            clips.sort((first, second) => first.order - second.order);
+            renderAudioClips(clips.map((clip, index) => ({
+                ...clip,
+                filename: `focus-speech-${String(index + 1).padStart(3, "0")}.${clip.extension}`,
+                text: normalizedItems[index] || "",
+            })));
+            setStatus(`${clips.length} STAR audio ${clips.length === 1 ? "file is" : "files are"} ready.`);
         } catch (error) {
-            setError("STAR audio could not be generated.");
+            setError(error.message || "STAR audio could not be generated.");
         } finally {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+                websocket.close();
+            }
             primaryAction.disabled = false;
         }
     }
@@ -330,6 +575,62 @@
 
     voiceSource.addEventListener("change", toggleVoiceSource);
 
+    saveStarSettings.addEventListener("click", function () {
+        clearError();
+        try {
+            const socketUrl = validateStarSocketUrl(starSocketUrl.value);
+            if (saveStarSocketUrl(socketUrl)) {
+                starSocketUrl.value = socketUrl;
+                resetStarVoices("Test STAR connection to load voices");
+                setStatus("STAR settings saved in this browser.");
+            }
+        } catch (error) {
+            resetStarVoices("Test STAR connection to load voices");
+            setError(error.message);
+            starSocketUrl.focus();
+        }
+    });
+
+    testStarConnection.addEventListener("click", async function () {
+        clearError();
+        let socketUrl;
+        try {
+            socketUrl = validateStarSocketUrl(starSocketUrl.value || storedStarSocketUrl());
+        } catch (error) {
+            resetStarVoices("Test STAR connection to load voices");
+            setError(error.message);
+            starSocketUrl.focus();
+            return;
+        }
+
+        testStarConnection.disabled = true;
+        resetStarVoices("STAR voices are loading");
+        setStatus("Testing STAR connection.");
+        try {
+            const voices = await loadStarVoices(socketUrl);
+            const saved = saveStarSocketUrl(socketUrl);
+            starSocketUrl.value = socketUrl;
+            if (saved) {
+                setStatus(`${voices.length} STAR voice${voices.length === 1 ? "" : "s"} available.`);
+            }
+        } catch (error) {
+            resetStarVoices("Test STAR connection to load voices");
+            setError(error.message || "STAR voices could not be loaded.");
+        } finally {
+            testStarConnection.disabled = false;
+        }
+    });
+
+    forgetStarSettings.addEventListener("click", function () {
+        clearError();
+        const forgotten = forgetStarSocketUrl();
+        starSocketUrl.value = "";
+        resetStarVoices("Test STAR connection to load voices");
+        if (forgotten) {
+            setStatus("STAR settings forgotten in this browser.");
+        }
+    });
+
     stopSpeech.addEventListener("click", function () {
         clearError();
         if ("speechSynthesis" in window) {
@@ -338,10 +639,16 @@
         }
     });
 
+    const savedSocketUrl = storedStarSocketUrl();
+    if (savedSocketUrl) {
+        starSocketUrl.value = savedSocketUrl;
+        setStatus("STAR settings loaded from this browser. Test the connection to load voices.");
+    }
+
+    resetStarVoices("Test STAR connection to load voices");
     populateVoices();
     if ("speechSynthesis" in window) {
         window.speechSynthesis.onvoiceschanged = populateVoices;
     }
     toggleVoiceSource();
-    loadStarVoices();
 }());

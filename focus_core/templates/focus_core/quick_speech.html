@@ -14,14 +14,7 @@
         </p>
     </div>
 
-    <form
-        class="form-stack speech-tool"
-        id="quick-speech-form"
-        data-star-configured="{% if star_configured %}true{% else %}false{% endif %}"
-        data-star-voices-url="{% url 'quick_speech_star_voices' %}"
-        data-star-generate-url="{% url 'quick_speech_star_generate' %}"
-    >
-        {% csrf_token %}
+    <form class="form-stack speech-tool" id="quick-speech-form">
         <section class="section-block content-narrow">
             <h2 id="speech-input-heading">Speech text</h2>
             <div class="field-group">
@@ -68,12 +61,34 @@
                 <label for="voice-source">Voice source</label>
                 <select id="voice-source" class="field-control" aria-describedby="voice-source-help">
                     <option value="browser">Browser voices for preview</option>
-                    <option value="star" disabled>STAR audio generation is not configured yet</option>
+                    <option value="star" disabled>STAR audio generation needs a saved socket</option>
                 </select>
                 <p id="voice-source-help" class="field-help">
-                    Browser voices stay on this device for preview. STAR generation sends text to the configured relay and returns temporary downloadable audio.
+                    Browser voices stay on this device for preview. STAR generation sends text from this browser to the socket you save below and returns temporary downloadable audio.
                 </p>
             </div>
+
+            <fieldset class="field-group" aria-describedby="star-settings-help">
+                <legend>STAR settings</legend>
+                <label for="star-socket-url">STAR coagulator socket</label>
+                <input
+                    id="star-socket-url"
+                    class="field-control"
+                    type="text"
+                    inputmode="url"
+                    autocomplete="off"
+                    placeholder="ws://127.0.0.1:8001"
+                    aria-describedby="star-settings-help"
+                >
+                <p id="star-settings-help" class="field-help">
+                    The socket address is saved in this browser only. Use wss:// for hosted relays; local ws:// addresses may work during local testing.
+                </p>
+                <div class="action-row">
+                    <button type="button" class="button button--secondary" id="save-star-settings">Save STAR settings</button>
+                    <button type="button" class="button button--secondary" id="test-star-connection">Test STAR connection</button>
+                    <button type="button" class="button button--secondary" id="forget-star-settings">Forget STAR settings</button>
+                </div>
+            </fieldset>
 
             <div class="field-group" id="browser-voice-group">
                 <label for="browser-voice">Browser voice</label>
@@ -88,10 +103,10 @@
             <div class="field-group" id="star-voice-group" hidden>
                 <label for="star-voice">STAR voice</label>
                 <select id="star-voice" class="field-control" aria-describedby="star-voice-help">
-                    <option value="">STAR voices are loading</option>
+                    <option value="">Test STAR connection to load voices</option>
                 </select>
                 <p id="star-voice-help" class="field-help">
-                    Voice names come from the configured STAR relay. Generated audio is returned to this page for playback and download.
+                    Voice names come from the socket saved in this browser. Generated audio stays on this page unless you download it.
                 </p>
             </div>
 
@@ -122,7 +137,8 @@
         <ul>
             <li>Browser voice preview is handled by your browser and device.</li>
             <li>Text is not saved to your FOCUS account from this page.</li>
-            <li>STAR generation sends text to the configured relay only after you choose a STAR voice and generate audio.</li>
+            <li>STAR settings are saved in this browser only, and FOCUS does not receive the socket address.</li>
+            <li>STAR generation sends text from this browser to the saved socket only after you choose a STAR voice and generate audio.</li>
         </ul>
     </section>
 
@@ -132,5 +148,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{% static 'focus_core/quick_speech.js' %}?v=1" defer></script>
+<script src="{% static 'focus_core/quick_speech.js' %}?v=2" defer></script>
 {% endblock %}

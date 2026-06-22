@@ -107,7 +107,7 @@ The project is in active development. The current app is a Django application wi
 - Public quick speech page with browser voice preview.
 - Text edit field and plain text or Markdown file loading for quick speech drafts.
 - Optional line splitting so each non-empty line can be prepared as a separate browser speech preview.
-- Optional STAR relay integration for configured deployments, including STAR voice discovery and temporary downloadable audio clips.
+- Browser-level STAR settings for voice discovery and temporary downloadable audio clips through a user-configured coagulator socket.
 
 ## Planned Functionality
 
@@ -130,7 +130,6 @@ The following areas are not complete yet:
 - Django 5
 - SQLite for local development
 - WebAuthn passkeys through the `webauthn` Python package
-- Optional STAR relay support through the `websockets` Python package
 
 ## Local Development Setup
 
@@ -177,13 +176,9 @@ In local development, `DEBUG=True` enables the development sign-in page. Use it 
 
 ### Optional STAR speech relay
 
-Quick speech can use browser voices without extra setup. To enable STAR-backed audio generation, configure:
+Quick speech can use browser voices without extra setup. To enable STAR-backed audio generation, open the Quick speech page and enter a STAR coagulator socket address such as `ws://127.0.0.1:8001` or `wss://your-star-relay.example`.
 
-```python
-FOCUS_STAR_RELAY_URL = "wss://your-star-relay.example"
-```
-
-FOCUS does not expose the relay URL to the browser. It asks the relay for available voice names and sends text to the relay only when a user chooses STAR generation.
+The STAR socket address is saved in the current browser only. FOCUS does not receive the socket address, and STAR text is sent directly from the browser to the configured socket only when a user chooses STAR generation.
 
 ## Running Tests
 

@@ -108,7 +108,7 @@ The project is in active development. The current app is a Django application wi
 - Text edit field and plain text or Markdown file loading for quick speech drafts.
 - Optional line splitting so each non-empty line can be prepared as a separate browser speech preview.
 - Browser-level STAR settings for voice discovery and temporary downloadable audio clips through a user-configured coagulator socket.
-- Browser-only text and manifest downloads for prepared speech items.
+- Browser-only copy, text download, and manifest download actions for prepared speech items.
 
 ## Planned Functionality
 

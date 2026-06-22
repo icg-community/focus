@@ -159,6 +159,7 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Forget STAR settings")
         self.assertContains(response, 'id="browser-voice"')
         self.assertContains(response, 'id="star-voice"')
+        self.assertContains(response, "Copy prepared text")
         self.assertContains(response, "Download prepared text")
         self.assertContains(response, "Download manifest")
         self.assertContains(response, 'role="status"')

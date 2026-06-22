@@ -28,6 +28,7 @@
     const previewList = document.getElementById("speech-preview-list");
     const emptyState = document.getElementById("speech-empty-state");
     const speechExportActions = document.getElementById("speech-export-actions");
+    const copySpeechText = document.getElementById("copy-speech-text");
     const downloadSpeechText = document.getElementById("download-speech-text");
     const downloadSpeechManifest = document.getElementById("download-speech-manifest");
     const visibleStatus = document.getElementById("speech-visible-status");
@@ -36,6 +37,7 @@
     const starOption = voiceSource.querySelector('option[value="star"]');
     const audioUrls = [];
     const exportUrls = [];
+    let preparedTextForCopy = "";
 
     function setStatus(message) {
         visibleStatus.textContent = message;
@@ -74,6 +76,7 @@
             .filter((item) => item.text.trim());
 
         if (!preparedItems.length) {
+            preparedTextForCopy = "";
             speechExportActions.hidden = true;
             downloadSpeechText.removeAttribute("href");
             downloadSpeechManifest.removeAttribute("href");
@@ -88,13 +91,50 @@
             source,
             items: preparedItems,
         }, null, 2);
-        const textUrl = URL.createObjectURL(new Blob([`${textContent}\n`], { type: "text/plain" }));
+        preparedTextForCopy = `${textContent}\n`;
+        const textUrl = URL.createObjectURL(new Blob([preparedTextForCopy], { type: "text/plain" }));
         const manifestUrl = URL.createObjectURL(new Blob([`${manifestContent}\n`], { type: "application/json" }));
 
         exportUrls.push(textUrl, manifestUrl);
         downloadSpeechText.href = textUrl;
         downloadSpeechManifest.href = manifestUrl;
         speechExportActions.hidden = false;
+    }
+
+    function copyTextWithFallback(text) {
+        const textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.setAttribute("readonly", "");
+        textArea.style.position = "fixed";
+        textArea.style.top = "0";
+        textArea.style.opacity = "0";
+        document.body.append(textArea);
+        textArea.select();
+
+        const copied = document.execCommand("copy");
+        textArea.remove();
+        if (!copied) {
+            throw new Error("Prepared text could not be copied.");
+        }
+    }
+
+    async function copyPreparedTextToClipboard() {
+        clearError();
+        if (!preparedTextForCopy.trim()) {
+            setError("Prepare speech before copying text.");
+            return;
+        }
+
+        try {
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(preparedTextForCopy);
+            } else {
+                copyTextWithFallback(preparedTextForCopy);
+            }
+            setStatus("Prepared text copied to clipboard.");
+        } catch (error) {
+            setError(error.message || "Prepared text could not be copied.");
+        }
     }
 
     function shortLabel(text) {
@@ -620,6 +660,8 @@
     });
 
     voiceSource.addEventListener("change", toggleVoiceSource);
+
+    copySpeechText.addEventListener("click", copyPreparedTextToClipboard);
 
     saveStarSettings.addEventListener("click", function () {
         clearError();

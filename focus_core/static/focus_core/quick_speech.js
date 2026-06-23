@@ -157,6 +157,20 @@
         }
     }
 
+    function createItemTextDownloadLink(text, itemNumber) {
+        const downloadLink = document.createElement("a");
+        const itemText = `${String(text || "").trim()}\n`;
+        const textUrl = URL.createObjectURL(new Blob([itemText], { type: "text/plain" }));
+        exportUrls.push(textUrl);
+
+        downloadLink.className = "button button--secondary";
+        downloadLink.href = textUrl;
+        downloadLink.download = `focus-speech-item-${String(itemNumber).padStart(3, "0")}.txt`;
+        downloadLink.textContent = `Download item ${itemNumber} text`;
+        downloadLink.setAttribute("aria-label", `Download item ${itemNumber} text: ${shortLabel(text)}`);
+        return downloadLink;
+    }
+
     function shortLabel(text) {
         const collapsed = text.replace(/\s+/g, " ").trim();
         if (collapsed.length <= 60) {
@@ -337,6 +351,7 @@
 
     function renderBrowserPreviews(items) {
         releaseAudioUrls();
+        updatePreparedExports(items, "browser-preview");
         previewList.replaceChildren();
         items.forEach((item, index) => {
             const itemNumber = index + 1;
@@ -371,7 +386,7 @@
                 copyItemTextToClipboard(item, itemNumber);
             });
 
-            actions.append(playButton, copyButton);
+            actions.append(playButton, copyButton, createItemTextDownloadLink(item, itemNumber));
             article.append(heading, text, actions);
             listItem.append(article);
             previewList.append(listItem);
@@ -380,11 +395,11 @@
         const hasItems = items.length > 0;
         previewList.hidden = !hasItems;
         emptyState.hidden = hasItems;
-        updatePreparedExports(items, "browser-preview");
     }
 
     function renderAudioClips(clips) {
         releaseAudioUrls();
+        updatePreparedExports(clips, "star-audio");
         previewList.replaceChildren();
         clips.forEach((clip, index) => {
             const itemNumber = index + 1;
@@ -412,7 +427,7 @@
             downloadLink.className = "button button--secondary";
             downloadLink.href = audioUrl;
             downloadLink.download = clip.filename || `focus-speech-${itemNumber}.wav`;
-            downloadLink.textContent = `Download item ${itemNumber}`;
+            downloadLink.textContent = `Download item ${itemNumber} audio`;
 
             const copyButton = document.createElement("button");
             copyButton.type = "button";
@@ -423,7 +438,7 @@
                 copyItemTextToClipboard(clip.text || "", itemNumber);
             });
 
-            actions.append(copyButton, downloadLink);
+            actions.append(copyButton, createItemTextDownloadLink(clip.text || "", itemNumber), downloadLink);
             article.append(heading, text, audio, actions);
             listItem.append(article);
             previewList.append(listItem);
@@ -432,7 +447,6 @@
         const hasClips = clips.length > 0;
         previewList.hidden = !hasClips;
         emptyState.hidden = hasClips;
-        updatePreparedExports(clips, "star-audio");
     }
 
     function openStarSocket(socketUrl) {

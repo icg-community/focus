@@ -18,6 +18,7 @@ The project is in active development. The current app is a Django application wi
 
 - Pseudonymous user model with no required email address, legal name, or password.
 - Development-only sign-in flow for local work.
+- Environment-configured GitHub and Discord sign-in providers, plus Mastodon sign-in with user-selected servers.
 - Passkey registration and passkey sign-in.
 - One-time backup keys for account recovery.
 - Backup key sign-in.
@@ -114,13 +115,12 @@ The project is in active development. The current app is a Django application wi
 
 The following areas are not complete yet:
 
-- Production-ready authentication provider integrations beyond the local development provider.
 - More complete project lifecycle controls, such as richer export formats and retention options.
 - More detailed notification preferences.
 - Richer project assets and script tracking, including deeper workflow states beyond shared resource links.
 - Saved project assets for generated speech clips.
 - More detailed per-assignment permissions for admins, editors, writers, and talent.
-- Stronger production settings, including environment-based secrets, allowed hosts, secure cookies, and deployment documentation.
+- Deployment hardening for the final hosting environment, including backups, logging, static file serving, and process supervision.
 - Automated accessibility checks in continuous integration.
 - Broader manual accessibility testing notes for NVDA, JAWS, Narrator, VoiceOver, keyboard-only use, zoom, and high contrast.
 - Contributor documentation for issue triage, pull requests, code review, and release workflow.
@@ -180,6 +180,53 @@ In local development, `DEBUG=True` enables the development sign-in page. Use it 
 Quick speech can use browser voices without extra setup. To enable STAR-backed audio generation, open the Quick speech page and enter a STAR coagulator socket address such as `ws://127.0.0.1:8001` or `wss://your-star-relay.example`.
 
 The STAR socket address is saved in the current browser only. FOCUS does not receive the socket address, and STAR text is sent directly from the browser to the configured socket only when a user chooses STAR generation.
+
+## Production Configuration
+
+FOCUS can be deployed without Docker. The app reads production settings from environment variables, so it can run under a platform service, a virtual machine, a process manager, or a container.
+
+Minimum production settings:
+
+```bash
+FOCUS_SECRET_KEY=replace-with-a-long-random-secret
+FOCUS_DEBUG=false
+FOCUS_ALLOWED_HOSTS=focus.example.org
+FOCUS_CSRF_TRUSTED_ORIGINS=https://focus.example.org
+FOCUS_SESSION_COOKIE_SECURE=true
+FOCUS_CSRF_COOKIE_SECURE=true
+FOCUS_SECURE_SSL_REDIRECT=true
+FOCUS_ENABLE_DEV_SIGN_IN=false
+```
+
+If FOCUS runs behind a trusted HTTPS reverse proxy, also set:
+
+```bash
+FOCUS_SECURE_PROXY_SSL_HEADER=true
+```
+
+Configure any static external sign-in providers before opening a production deployment to users:
+
+```bash
+FOCUS_GITHUB_CLIENT_ID=your-github-oauth-client-id
+FOCUS_GITHUB_CLIENT_SECRET=your-github-oauth-client-secret
+
+FOCUS_DISCORD_CLIENT_ID=your-discord-oauth-client-id
+FOCUS_DISCORD_CLIENT_SECRET=your-discord-oauth-client-secret
+```
+
+Mastodon sign-in does not require choosing one server in deployment settings. Users enter the server where their Mastodon account lives, and FOCUS uses that server's OAuth API for the sign-in request. To disable Mastodon sign-in:
+
+```bash
+FOCUS_ENABLE_MASTODON_SIGN_IN=false
+```
+
+Provider callback paths are:
+
+- GitHub: `/auth/github/callback/`
+- Discord: `/auth/discord/callback/`
+- Mastodon: `/auth/mastodon/callback/`, used after the user chooses their Mastodon server
+
+FOCUS uses provider sign-in only to confirm a stable account ID and handle. It does not store provider access tokens, email addresses, legal names, or passwords.
 
 ## Running Tests
 

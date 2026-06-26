@@ -1,0 +1,21 @@
+{% extends "focus_core/base.html" %}
+
+{% block title %}{% if is_connect_flow %}Connect Mastodon{% else %}Sign in with Mastodon{% endif %}{% endblock %}
+
+{% block content %}
+<div class="content-narrow">
+    <p class="eyebrow">{% if is_connect_flow %}Connected account{% else %}Sign in{% endif %}</p>
+    <h1>{% if is_connect_flow %}Connect Mastodon{% else %}Sign in with Mastodon{% endif %}</h1>
+    <p>Enter the server where your Mastodon account lives. FOCUS will send you there to approve sign in.</p>
+    {% include "focus_core/includes/form_errors.html" %}
+    <form method="post" class="form-stack" novalidate>
+        {% csrf_token %}
+        {% include "focus_core/includes/field.html" with field=form.server %}
+        <button type="submit" class="button">{% if is_connect_flow %}Continue to Mastodon{% else %}Sign in with Mastodon{% endif %}</button>
+    </form>
+    {% if not is_connect_flow %}
+        <p><a href="{{ passkey_sign_in_url }}">Use a passkey instead</a></p>
+        <p><a href="{{ backup_key_sign_in_url }}">Use a backup key instead</a></p>
+    {% endif %}
+</div>
+{% endblock %}

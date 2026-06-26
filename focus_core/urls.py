@@ -13,6 +13,8 @@ urlpatterns = [
     path("status/", views.StatusView.as_view(), name="status"),
     path("status/health/", views.StatusHealthView.as_view(), name="status_health"),
     path("dev/sign-in/", views.DevSignInView.as_view(), name="dev_sign_in"),
+    path("auth/<str:provider>/start/", views.OAuthStartView.as_view(), name="oauth_sign_in_start"),
+    path("auth/<str:provider>/callback/", views.OAuthCallbackView.as_view(), name="oauth_callback"),
     path("backup-key/sign-in/", views.BackupKeySignInView.as_view(), name="backup_key_sign_in"),
     path("passkey/sign-in/", views.PasskeySignInView.as_view(), name="passkey_sign_in"),
     path("passkey/sign-in/options/", views.PasskeyAuthenticationOptionsView.as_view(), name="passkey_authentication_options"),
@@ -26,6 +28,11 @@ urlpatterns = [
         "account/linked-accounts/development/new/",
         views.DevelopmentLinkedAccountCreateView.as_view(),
         name="development_linked_account_create",
+    ),
+    path(
+        "account/linked-accounts/<str:provider>/connect/",
+        views.OAuthConnectStartView.as_view(),
+        name="oauth_connect_start",
     ),
     path(
         "account/linked-accounts/<int:pk>/remove/",

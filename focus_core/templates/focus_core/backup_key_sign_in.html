@@ -13,6 +13,16 @@
         {% include "focus_core/includes/field.html" with field=form.backup_key %}
         <button type="submit" class="button">Sign in with backup key</button>
     </form>
+    {% if oauth_provider_rows %}
+        <section class="section-block" aria-labelledby="provider-sign-in-heading">
+            <h2 id="provider-sign-in-heading">Sign in with a connected account</h2>
+            <ul>
+                {% for provider in oauth_provider_rows %}
+                    <li><a href="{{ provider.start_url }}">Sign in with {{ provider.label }}</a></li>
+                {% endfor %}
+            </ul>
+        </section>
+    {% endif %}
     <p><a href="{{ passkey_sign_in_url }}">Use a passkey instead</a></p>
 </div>
 {% endblock %}

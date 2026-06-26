@@ -75,6 +75,17 @@ class DevelopmentLinkedAccountForm(AccessibleForm):
         return self.cleaned_data["handle"].strip()
 
 
+class MastodonServerForm(AccessibleForm):
+    server = forms.CharField(
+        label="Mastodon server",
+        help_text="Enter the server where your Mastodon account lives, such as mastodon.social.",
+        max_length=255,
+    )
+
+    def clean_server(self):
+        return self.cleaned_data["server"].strip()
+
+
 class ProductionGroupForm(AccessibleModelForm):
     class Meta:
         model = ProductionGroup

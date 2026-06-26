@@ -1,6 +1,9 @@
 import json
 import secrets
 from importlib.metadata import PackageNotFoundError, version
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from django import forms
 from django.conf import settings
@@ -28,7 +31,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectResourceForm, ProjectStatusForm, VideoProjectForm
+from .forms import BackupKeySignInForm, DevelopmentLinkedAccountForm, DisplayNameForm, GroupInvitationForm, MastodonServerForm, MembershipRoleForm, PasskeyNameForm, PasskeyRegistrationForm, ProductionGroupForm, ProjectNoteForm, ProjectResourceForm, ProjectStatusForm, VideoProjectForm
 from .models import AuthIdentity, GroupInvitation, GroupNotification, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
 
 
@@ -41,6 +44,13 @@ PASSKEY_AUTHENTICATION_CHALLENGE_SESSION_KEY = "passkey_authentication_challenge
 PASSKEY_AUTHENTICATION_RP_ID_SESSION_KEY = "passkey_authentication_rp_id"
 PASSKEY_AUTHENTICATION_ORIGIN_SESSION_KEY = "passkey_authentication_origin"
 PASSKEY_AUTHENTICATION_NEXT_SESSION_KEY = "passkey_authentication_next"
+OAUTH_STATE_SESSION_KEY = "oauth_state"
+OAUTH_PROVIDER_SESSION_KEY = "oauth_provider"
+OAUTH_NEXT_SESSION_KEY = "oauth_next"
+OAUTH_MODE_SESSION_KEY = "oauth_mode"
+OAUTH_DYNAMIC_CONFIG_SESSION_KEY = "oauth_dynamic_config"
+OAUTH_MODE_SIGN_IN = "sign_in"
+OAUTH_MODE_CONNECT = "connect"
 
 
 def app_version():
@@ -51,12 +61,16 @@ def app_version():
 
 
 def production_settings_ready():
+    has_secure_secret = settings.SECRET_KEY != getattr(settings, "DEFAULT_INSECURE_SECRET_KEY", "")
     return (
         not settings.DEBUG
+        and has_secure_secret
         and bool(settings.ALLOWED_HOSTS)
         and getattr(settings, "SESSION_COOKIE_SECURE", False)
         and getattr(settings, "CSRF_COOKIE_SECURE", False)
         and getattr(settings, "SECURE_SSL_REDIRECT", False)
+        and not getattr(settings, "FOCUS_ENABLE_DEV_SIGN_IN", False)
+        and bool(available_oauth_provider_count())
     )
 
 
@@ -82,6 +96,8 @@ class StatusView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         production_ready = production_settings_ready()
+        provider_count = available_oauth_provider_count()
+        provider_summary = "Provider sign-in is configured" if provider_count else "Provider sign-in is implemented but not configured"
         context["status_summary"] = [
             {
                 "label": "Application version",
@@ -100,8 +116,8 @@ class StatusView(TemplateView):
             },
             {
                 "label": "Authentication providers",
-                "value": "Development sign-in, passkeys, and backup keys are implemented",
-                "status": "Provider integrations still needed",
+                "value": "GitHub, Discord, Mastodon, passkeys, and backup keys are implemented",
+                "status": provider_summary,
             },
             {
                 "label": "Accessibility evidence",
@@ -117,13 +133,13 @@ class StatusView(TemplateView):
             },
             {
                 "area": "Production authentication",
-                "status": "Needs setup",
-                "detail": "Real linked-account providers still need production integration beyond local development sign-in.",
+                "status": "Implemented" if provider_count else "Needs provider credentials",
+                "detail": "Provider sign-in is implemented for GitHub, Discord, and user-selected Mastodon servers. GitHub and Discord need provider client IDs and secrets in production.",
             },
             {
                 "area": "Production settings",
-                "status": "Needs setup",
-                "detail": "Environment secrets, allowed hosts, secure cookies, HTTPS redirects, and deployment settings still need to be configured.",
+                "status": "Ready" if production_ready else "Needs environment setup",
+                "detail": "Environment secrets, allowed hosts, secure cookies, HTTPS redirects, and any static provider credentials must be configured for each deployment.",
             },
             {
                 "area": "Backups and retention",
@@ -456,6 +472,165 @@ def url_with_next_path(view_name, next_path):
     return f"{reverse(view_name)}?{urlencode({'next': next_path})}"
 
 
+def normalize_provider(provider):
+    return provider.upper()
+
+
+def enabled_oauth_provider_configs():
+    providers = getattr(settings, "FOCUS_OAUTH_PROVIDERS", {})
+    return {
+        provider: config
+        for provider, config in providers.items()
+        if config.get("client_id") and config.get("client_secret")
+    }
+
+
+def enabled_oauth_provider(provider):
+    return enabled_oauth_provider_configs().get(normalize_provider(provider))
+
+
+def mastodon_sign_in_enabled():
+    return getattr(settings, "FOCUS_ENABLE_MASTODON_SIGN_IN", True)
+
+
+def available_oauth_provider_count():
+    provider_count = len(enabled_oauth_provider_configs())
+    if mastodon_sign_in_enabled():
+        provider_count += 1
+    return provider_count
+
+
+def oauth_provider_rows(request, start_view_name):
+    rows = []
+    next_url = request.GET.get("next")
+    for provider, config in enabled_oauth_provider_configs().items():
+        start_url = reverse(start_view_name, kwargs={"provider": provider.lower()})
+        if next_url and safe_next_url(request) == next_url:
+            start_url = f"{start_url}?{urlencode({'next': next_url})}"
+        rows.append({"provider": provider, "label": config["label"], "start_url": start_url})
+    if mastodon_sign_in_enabled():
+        start_url = reverse(start_view_name, kwargs={"provider": "mastodon"})
+        if next_url and safe_next_url(request) == next_url:
+            start_url = f"{start_url}?{urlencode({'next': next_url})}"
+        rows.append({"provider": "MASTODON", "label": "Mastodon", "start_url": start_url})
+    return rows
+
+
+def oauth_callback_url(request, provider):
+    return request.build_absolute_uri(reverse("oauth_callback", kwargs={"provider": provider.lower()}))
+
+
+def post_form_json(url, data):
+    request = Request(
+        url,
+        data=urlencode(data).encode("utf-8"),
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
+            "User-Agent": "FOCUS",
+        },
+        method="POST",
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def get_json(url):
+    request = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "FOCUS",
+        },
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def get_bearer_json(url, token):
+    request = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "FOCUS",
+        },
+    )
+    with urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def normalize_mastodon_base_url(server):
+    value = server.strip().removeprefix("@")
+    if "://" not in value:
+        value = f"https://{value}"
+
+    parsed = urlparse(value)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password or parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("Enter a Mastodon server, such as mastodon.social.")
+
+    return f"https://{parsed.netloc.lower()}"
+
+
+def discover_mastodon_oauth_config(server, request):
+    base_url = normalize_mastodon_base_url(server)
+    metadata = {}
+    try:
+        metadata = get_json(f"{base_url}/.well-known/oauth-authorization-server")
+    except HTTPError as error:
+        if error.code != 404:
+            raise
+
+    scopes = metadata.get("scopes_supported", [])
+    scope = "profile" if "profile" in scopes else "read:accounts"
+    callback_url = oauth_callback_url(request, "MASTODON")
+    registration_url = metadata.get("app_registration_endpoint") or f"{base_url}/api/v1/apps"
+    application = post_form_json(
+        registration_url,
+        {
+            "client_name": "FOCUS",
+            "redirect_uris": callback_url,
+            "scopes": scope,
+            "website": request.build_absolute_uri(reverse("about")),
+        },
+    )
+    profile_url = metadata.get("userinfo_endpoint") if scope == "profile" else None
+    return {
+        "label": "Mastodon",
+        "client_id": application["client_id"],
+        "client_secret": application["client_secret"],
+        "authorize_url": metadata.get("authorization_endpoint") or f"{base_url}/oauth/authorize",
+        "token_url": metadata.get("token_endpoint") or f"{base_url}/oauth/token",
+        "profile_url": profile_url or f"{base_url}/api/v1/accounts/verify_credentials",
+        "scope": scope,
+        "base_url": base_url,
+    }
+
+
+def oauth_identity_from_profile(provider, profile, config):
+    if provider == "GITHUB":
+        return str(profile["id"]), profile["login"]
+
+    if provider == "DISCORD":
+        return str(profile["id"]), profile["username"]
+
+    if provider == "MASTODON":
+        subject_host = urlparse(config["base_url"]).netloc
+        if "sub" in profile:
+            handle = profile.get("preferred_username") or profile.get("name") or "mastodon-user"
+            if "@" not in handle:
+                handle = f"{handle}@{subject_host}"
+            return profile["sub"], handle
+
+        subject_id = f"{subject_host}:{profile['id']}"
+        handle = profile.get("acct") or profile.get("username")
+        if handle and "@" not in handle:
+            handle = f"{handle}@{subject_host}"
+        return subject_id, handle
+
+    raise ValueError("Unsupported provider.")
+
+
 def user_has_access_method(user, excluding_identity=None, excluding_passkey=None):
     identities = user.identities.all()
     if excluding_identity:
@@ -472,6 +647,159 @@ def user_has_access_method(user, excluding_identity=None, excluding_passkey=None
     )
 
 
+class OAuthStartView(View):
+    mode = OAUTH_MODE_SIGN_IN
+
+    def get(self, request, provider, *args, **kwargs):
+        provider = normalize_provider(provider)
+        if self.mode == OAUTH_MODE_SIGN_IN and request.user.is_authenticated:
+            return redirect(safe_next_url(request))
+
+        if provider == "MASTODON" and mastodon_sign_in_enabled():
+            return self.render_mastodon_server_form(request, MastodonServerForm())
+
+        config = enabled_oauth_provider(provider)
+        if not config:
+            raise Http404()
+
+        return self.start_oauth_redirect(request, provider, config)
+
+    def post(self, request, provider, *args, **kwargs):
+        provider = normalize_provider(provider)
+        if provider != "MASTODON" or not mastodon_sign_in_enabled():
+            raise Http404()
+
+        if self.mode == OAUTH_MODE_SIGN_IN and request.user.is_authenticated:
+            return redirect(safe_next_url(request))
+
+        form = MastodonServerForm(request.POST)
+        if not form.is_valid():
+            return self.render_mastodon_server_form(request, form)
+
+        try:
+            config = discover_mastodon_oauth_config(form.cleaned_data["server"], request)
+        except (HTTPError, URLError, KeyError, ValueError, json.JSONDecodeError):
+            form.add_error("server", "FOCUS could not start sign in with that Mastodon server. Check the server name and try again.")
+            return self.render_mastodon_server_form(request, form)
+
+        request.session[OAUTH_DYNAMIC_CONFIG_SESSION_KEY] = config
+        return self.start_oauth_redirect(request, provider, config)
+
+    def render_mastodon_server_form(self, request, form):
+        return render(
+            request,
+            "focus_core/mastodon_server_form.html",
+            {
+                "form": form,
+                "is_connect_flow": self.mode == OAUTH_MODE_CONNECT,
+                "passkey_sign_in_url": url_with_next(request, "passkey_sign_in"),
+                "backup_key_sign_in_url": url_with_next(request, "backup_key_sign_in"),
+            },
+        )
+
+    def start_oauth_redirect(self, request, provider, config):
+        state = secrets.token_urlsafe(32)
+        request.session[OAUTH_STATE_SESSION_KEY] = state
+        request.session[OAUTH_PROVIDER_SESSION_KEY] = provider
+        request.session[OAUTH_NEXT_SESSION_KEY] = safe_next_url(request)
+        request.session[OAUTH_MODE_SESSION_KEY] = self.mode
+
+        params = {
+            "client_id": config["client_id"],
+            "redirect_uri": oauth_callback_url(request, provider),
+            "response_type": "code",
+            "scope": config["scope"],
+            "state": state,
+        }
+        return redirect(f"{config['authorize_url']}?{urlencode(params)}")
+
+
+class OAuthConnectStartView(LoginRequiredMixin, OAuthStartView):
+    mode = OAUTH_MODE_CONNECT
+
+
+class OAuthCallbackView(View):
+    def get(self, request, provider, *args, **kwargs):
+        provider = normalize_provider(provider)
+        expected_state = request.session.pop(OAUTH_STATE_SESSION_KEY, None)
+        expected_provider = request.session.pop(OAUTH_PROVIDER_SESSION_KEY, None)
+        next_url = request.session.pop(OAUTH_NEXT_SESSION_KEY, reverse("dashboard"))
+        mode = request.session.pop(OAUTH_MODE_SESSION_KEY, OAUTH_MODE_SIGN_IN)
+        dynamic_config = request.session.pop(OAUTH_DYNAMIC_CONFIG_SESSION_KEY, None)
+        config = dynamic_config if provider == "MASTODON" else enabled_oauth_provider(provider)
+
+        if not config or provider != expected_provider or request.GET.get("state") != expected_state:
+            messages.error(request, "That sign-in request could not be verified. Try again.")
+            return redirect("passkey_sign_in")
+
+        code = request.GET.get("code")
+        if not code:
+            messages.error(request, "The provider did not finish sign in. Try again.")
+            return redirect("passkey_sign_in")
+
+        if mode == OAUTH_MODE_CONNECT and not request.user.is_authenticated:
+            messages.error(request, "Sign in again before connecting another account.")
+            return redirect("passkey_sign_in")
+
+        try:
+            token_data = post_form_json(
+                config["token_url"],
+                {
+                    "client_id": config["client_id"],
+                    "client_secret": config["client_secret"],
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": oauth_callback_url(request, provider),
+                },
+            )
+            access_token = token_data["access_token"]
+            profile = get_bearer_json(config["profile_url"], access_token)
+            subject_id, handle = oauth_identity_from_profile(provider, profile, config)
+        except (HTTPError, URLError, KeyError, ValueError, json.JSONDecodeError):
+            messages.error(request, "FOCUS could not finish sign in with that provider. Try again.")
+            return redirect("passkey_sign_in")
+
+        with transaction.atomic():
+            identity = AuthIdentity.objects.select_for_update().filter(provider=provider, subject_id=subject_id).select_related("user").first()
+            if mode == OAUTH_MODE_CONNECT:
+                if identity and identity.user_id != request.user.pk:
+                    messages.error(request, "That account is already connected to another FOCUS user.")
+                    return redirect("account_safety")
+                if not identity:
+                    AuthIdentity.objects.create(
+                        user=request.user,
+                        provider=provider,
+                        subject_id=subject_id,
+                        handle=handle,
+                        last_seen_at=timezone.now(),
+                    )
+                else:
+                    identity.handle = handle
+                    identity.last_seen_at = timezone.now()
+                    identity.save(update_fields=["handle", "last_seen_at"])
+                messages.success(request, f"Connected {config['label']} {handle}.")
+                return redirect("account_safety")
+
+            if not identity:
+                user = get_user_model().objects.create()
+                identity = AuthIdentity.objects.create(
+                    user=user,
+                    provider=provider,
+                    subject_id=subject_id,
+                    handle=handle,
+                    last_seen_at=timezone.now(),
+                )
+            else:
+                user = identity.user
+                identity.handle = handle
+                identity.last_seen_at = timezone.now()
+                identity.save(update_fields=["handle", "last_seen_at"])
+
+        login(request, user, backend="django.contrib.auth.backends.ModelBackend")
+        messages.success(request, f"You are signed in with {config['label']}.")
+        return redirect(next_url)
+
+
 class DevSignInView(FormView):
     template_name = "focus_core/dev_sign_in.html"
     form_class = forms.Form
@@ -485,6 +813,7 @@ class DevSignInView(FormView):
         context = super().get_context_data(**kwargs)
         context["passkey_sign_in_url"] = url_with_next(self.request, "passkey_sign_in")
         context["backup_key_sign_in_url"] = url_with_next(self.request, "backup_key_sign_in")
+        context["oauth_provider_rows"] = oauth_provider_rows(self.request, "oauth_sign_in_start")
         return context
 
     def post(self, request, *args, **kwargs):
@@ -515,6 +844,7 @@ class BackupKeySignInView(FormView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["passkey_sign_in_url"] = url_with_next(self.request, "passkey_sign_in")
+        context["oauth_provider_rows"] = oauth_provider_rows(self.request, "oauth_sign_in_start")
         return context
 
     def form_valid(self, form):
@@ -547,6 +877,7 @@ class PasskeySignInView(TemplateView):
         context["dev_sign_in_url"] = url_with_next(self.request, "dev_sign_in")
         context["passkey_authentication_options_url"] = url_with_next(self.request, "passkey_authentication_options")
         context["passkey_authentication_complete_url"] = url_with_next(self.request, "passkey_authentication_complete")
+        context["oauth_provider_rows"] = oauth_provider_rows(self.request, "oauth_sign_in_start")
         return context
 
 
@@ -839,6 +1170,7 @@ class AccountSafetyView(LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         user = self.request.user
         context["can_connect_development_account"] = settings.FOCUS_ENABLE_DEV_SIGN_IN
+        context["oauth_provider_rows"] = oauth_provider_rows(self.request, "oauth_connect_start")
         context["unused_recovery_code_count"] = user.recovery_codes.filter(used_at__isnull=True).count()
         context["identity_rows"] = [
             {

@@ -40,6 +40,14 @@
     <section class="section-block" aria-labelledby="connected-accounts-heading">
         <h2 id="connected-accounts-heading">Connected accounts</h2>
         <p>These accounts can identify you without FOCUS storing an email address or password.</p>
+        {% if oauth_provider_rows %}
+            <p>Connect another sign-in provider:</p>
+            <ul>
+                {% for provider in oauth_provider_rows %}
+                    <li><a class="button button--secondary" href="{{ provider.start_url }}">Connect {{ provider.label }}</a></li>
+                {% endfor %}
+            </ul>
+        {% endif %}
         {% if can_connect_development_account %}
             <p><a class="button button--secondary" href="{% url 'development_linked_account_create' %}">Connect development account</a></p>
         {% endif %}

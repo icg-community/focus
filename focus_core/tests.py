@@ -2,6 +2,7 @@ import json
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlparse
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
@@ -9,7 +10,31 @@ from django.urls import reverse
 from django.utils import timezone
 from webauthn.helpers import bytes_to_base64url
 
+from focus_project.settings import env_bool, env_list
+
 from .models import AuthIdentity, FocusUser, GroupInvitation, GroupNotification, Membership, ProductionGroup, ProjectNote, ProjectNotification, ProjectResource, RecoveryCode, VideoProject, WebAuthnCredential
+
+
+OAUTH_TEST_PROVIDERS = {
+    "GITHUB": {
+        "label": "GitHub",
+        "client_id": "github-client",
+        "client_secret": "github-secret",
+        "authorize_url": "https://github.example/authorize",
+        "token_url": "https://github.example/token",
+        "profile_url": "https://github.example/user",
+        "scope": "read:user",
+    },
+    "DISCORD": {
+        "label": "Discord",
+        "client_id": "discord-client",
+        "client_secret": "discord-secret",
+        "authorize_url": "https://discord.example/authorize",
+        "token_url": "https://discord.example/token",
+        "profile_url": "https://discord.example/users/@me",
+        "scope": "identify",
+    },
+}
 
 
 class FocusUserTests(TestCase):
@@ -59,6 +84,26 @@ class RecoveryCodeTests(TestCase):
         recovery_code.mark_used()
 
         self.assertFalse(recovery_code.matches("plain-text-code"))
+
+
+class SettingsHelperTests(TestCase):
+    def test_env_bool_parses_common_values(self):
+        with patch.dict("os.environ", {"FOCUS_FLAG": "yes"}):
+            self.assertTrue(env_bool("FOCUS_FLAG"))
+
+        with patch.dict("os.environ", {"FOCUS_FLAG": "off"}):
+            self.assertFalse(env_bool("FOCUS_FLAG", True))
+
+    def test_env_bool_uses_default_for_missing_or_unknown_values(self):
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertTrue(env_bool("FOCUS_MISSING", True))
+
+        with patch.dict("os.environ", {"FOCUS_FLAG": "sometimes"}):
+            self.assertFalse(env_bool("FOCUS_FLAG", False))
+
+    def test_env_list_splits_comma_separated_values(self):
+        with patch.dict("os.environ", {"FOCUS_ALLOWED_HOSTS": "focus.example, www.focus.example, "}):
+            self.assertEqual(env_list("FOCUS_ALLOWED_HOSTS"), ["focus.example", "www.focus.example"])
 
 
 class MembershipTests(TestCase):
@@ -175,13 +220,13 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, "Application version")
         self.assertContains(response, "Local development configuration")
         self.assertContains(response, "Production settings")
-        self.assertContains(response, "Needs setup")
+        self.assertContains(response, "Needs environment setup")
         self.assertContains(response, reverse("status_health"))
         self.assertContains(response, 'scope="col"')
         self.assertContains(response, 'scope="row"')
 
     def test_status_health_endpoint_reports_public_health(self):
-        response = self.client.get(reverse("status_health"))
+        response = self.client.get(reverse("status_health"), secure=True)
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -189,6 +234,23 @@ class ProductionFlowTests(TestCase):
         self.assertEqual(data["database"], "ok")
         self.assertIn("version", data)
         self.assertFalse(data["production_ready"])
+
+    @override_settings(
+        DEBUG=False,
+        SECRET_KEY="production-secret",
+        DEFAULT_INSECURE_SECRET_KEY="django-insecure-local-development-key",
+        ALLOWED_HOSTS=["focus.example", "testserver"],
+        SESSION_COOKIE_SECURE=True,
+        CSRF_COOKIE_SECURE=True,
+        SECURE_SSL_REDIRECT=True,
+        FOCUS_ENABLE_DEV_SIGN_IN=False,
+        FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]},
+    )
+    def test_status_health_reports_production_ready_when_secure_settings_are_configured(self):
+        response = self.client.get(reverse("status_health"), secure=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["production_ready"])
 
     def test_signed_out_brand_points_to_public_about_page(self):
         response = self.client.get(reverse("privacy"))
@@ -270,6 +332,197 @@ class ProductionFlowTests(TestCase):
         self.assertContains(response, reverse("backup_key_sign_in"))
         self.assertNotContains(response, "Use development sign in instead")
         self.assertNotContains(response, reverse("dev_sign_in"))
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]})
+    def test_sign_in_pages_show_configured_provider_links_with_safe_next(self):
+        response = self.client.get(f"{reverse('passkey_sign_in')}?next=/profile/")
+
+        self.assertContains(response, "Sign in with a connected account")
+        self.assertContains(response, "Sign in with GitHub")
+        self.assertContains(response, f"{reverse('oauth_sign_in_start', kwargs={'provider': 'github'})}?next=%2Fprofile%2F")
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]})
+    def test_oauth_sign_in_start_redirects_to_provider_and_stores_state(self):
+        response = self.client.get(f"{reverse('oauth_sign_in_start', kwargs={'provider': 'github'})}?next=/profile/")
+        location = urlparse(response["Location"])
+        query = parse_qs(location.query)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(f"{location.scheme}://{location.netloc}{location.path}", "https://github.example/authorize")
+        self.assertEqual(query["client_id"], ["github-client"])
+        self.assertEqual(query["scope"], ["read:user"])
+        self.assertEqual(query["response_type"], ["code"])
+        self.assertEqual(query["redirect_uri"], ["http://testserver/auth/github/callback/"])
+        self.assertEqual(query["state"], [self.client.session["oauth_state"]])
+        self.assertEqual(self.client.session["oauth_next"], reverse("profile"))
+
+    @override_settings(FOCUS_ENABLE_MASTODON_SIGN_IN=True)
+    def test_mastodon_sign_in_start_asks_for_server(self):
+        response = self.client.get(f"{reverse('oauth_sign_in_start', kwargs={'provider': 'mastodon'})}?next=/profile/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sign in with Mastodon")
+        self.assertContains(response, "Mastodon server")
+        self.assertContains(response, 'id="server-help"')
+        self.assertContains(response, 'aria-describedby="server-help"')
+
+    @override_settings(FOCUS_ENABLE_MASTODON_SIGN_IN=True)
+    def test_mastodon_sign_in_redirects_signed_in_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+
+        response = self.client.get(f"{reverse('oauth_sign_in_start', kwargs={'provider': 'mastodon'})}?next=/profile/")
+
+        self.assertRedirects(response, reverse("profile"))
+
+    @override_settings(FOCUS_ENABLE_MASTODON_SIGN_IN=True)
+    def test_mastodon_sign_in_registers_with_chosen_server_and_redirects(self):
+        metadata = {
+            "authorization_endpoint": "https://mastodon.social/oauth/authorize",
+            "token_endpoint": "https://mastodon.social/oauth/token",
+            "app_registration_endpoint": "https://mastodon.social/api/v1/apps",
+            "userinfo_endpoint": "https://mastodon.social/oauth/userinfo",
+            "scopes_supported": ["profile", "read:accounts"],
+        }
+
+        with patch("focus_core.views.get_json", return_value=metadata) as get_metadata:
+            with patch(
+                "focus_core.views.post_form_json",
+                return_value={"client_id": "mastodon-client", "client_secret": "mastodon-secret"},
+            ) as register_app:
+                response = self.client.post(
+                    f"{reverse('oauth_sign_in_start', kwargs={'provider': 'mastodon'})}?next=/profile/",
+                    {"server": "mastodon.social"},
+                )
+
+        location = urlparse(response["Location"])
+        query = parse_qs(location.query)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(f"{location.scheme}://{location.netloc}{location.path}", "https://mastodon.social/oauth/authorize")
+        self.assertEqual(query["client_id"], ["mastodon-client"])
+        self.assertEqual(query["scope"], ["profile"])
+        self.assertEqual(query["redirect_uri"], ["http://testserver/auth/mastodon/callback/"])
+        self.assertEqual(query["state"], [self.client.session["oauth_state"]])
+        self.assertEqual(self.client.session["oauth_next"], reverse("profile"))
+        self.assertEqual(self.client.session["oauth_dynamic_config"]["profile_url"], "https://mastodon.social/oauth/userinfo")
+        get_metadata.assert_called_once_with("https://mastodon.social/.well-known/oauth-authorization-server")
+        register_app.assert_called_once_with(
+            "https://mastodon.social/api/v1/apps",
+            {
+                "client_name": "FOCUS",
+                "redirect_uris": "http://testserver/auth/mastodon/callback/",
+                "scopes": "profile",
+                "website": "http://testserver/about/",
+            },
+        )
+
+    @override_settings(FOCUS_ENABLE_MASTODON_SIGN_IN=True)
+    def test_mastodon_sign_in_rejects_invalid_server_value_accessibly(self):
+        response = self.client.post(reverse("oauth_sign_in_start", kwargs={"provider": "mastodon"}), {"server": "https://mastodon.social/@creator"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "FOCUS could not start sign in with that Mastodon server. Check the server name and try again.")
+        self.assertContains(response, 'role="alert"')
+        self.assertContains(response, 'aria-invalid="true"')
+        self.assertContains(response, 'id="server-error"')
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]})
+    def test_oauth_callback_creates_pseudonymous_user_and_identity(self):
+        self.client.get(f"{reverse('oauth_sign_in_start', kwargs={'provider': 'github'})}?next=/profile/")
+        state = self.client.session["oauth_state"]
+
+        with patch("focus_core.views.post_form_json", return_value={"access_token": "token"}) as post_token:
+            with patch("focus_core.views.get_bearer_json", return_value={"id": 123, "login": "creator_handle"}) as get_profile:
+                response = self.client.get(f"{reverse('oauth_callback', kwargs={'provider': 'github'})}?state={state}&code=oauth-code")
+
+        identity = AuthIdentity.objects.get(provider="GITHUB", subject_id="123")
+        self.assertRedirects(response, reverse("profile"))
+        self.assertEqual(identity.handle, "creator_handle")
+        self.assertFalse(identity.user.has_usable_password())
+        self.assertEqual(self.client.session["_auth_user_id"], str(identity.user.pk))
+        post_token.assert_called_once()
+        get_profile.assert_called_once_with("https://github.example/user", "token")
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"DISCORD": OAUTH_TEST_PROVIDERS["DISCORD"]})
+    def test_oauth_callback_reuses_existing_identity_and_updates_handle(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        identity = AuthIdentity.objects.create(
+            user=user,
+            provider="DISCORD",
+            subject_id="456",
+            handle="old_handle",
+        )
+        self.client.get(reverse("oauth_sign_in_start", kwargs={"provider": "discord"}))
+        state = self.client.session["oauth_state"]
+
+        with patch("focus_core.views.post_form_json", return_value={"access_token": "token"}):
+            with patch("focus_core.views.get_bearer_json", return_value={"id": 456, "username": "new_handle"}):
+                response = self.client.get(f"{reverse('oauth_callback', kwargs={'provider': 'discord'})}?state={state}&code=oauth-code")
+
+        identity.refresh_from_db()
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertEqual(identity.handle, "new_handle")
+        self.assertIsNotNone(identity.last_seen_at)
+        self.assertEqual(self.client.session["_auth_user_id"], str(user.pk))
+
+    @override_settings(FOCUS_ENABLE_MASTODON_SIGN_IN=True)
+    def test_oauth_connect_adds_mastodon_provider_to_signed_in_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        self.client.force_login(user)
+        metadata = {
+            "authorization_endpoint": "https://mastodon.social/oauth/authorize",
+            "token_endpoint": "https://mastodon.social/oauth/token",
+            "app_registration_endpoint": "https://mastodon.social/api/v1/apps",
+            "userinfo_endpoint": "https://mastodon.social/oauth/userinfo",
+            "scopes_supported": ["profile"],
+        }
+        with patch("focus_core.views.get_json", return_value=metadata):
+            with patch("focus_core.views.post_form_json", return_value={"client_id": "mastodon-client", "client_secret": "mastodon-secret"}):
+                self.client.post(reverse("oauth_connect_start", kwargs={"provider": "mastodon"}), {"server": "mastodon.social"})
+        state = self.client.session["oauth_state"]
+
+        with patch("focus_core.views.post_form_json", return_value={"access_token": "token"}):
+            with patch(
+                "focus_core.views.get_bearer_json",
+                return_value={"sub": "https://mastodon.social/users/creator", "preferred_username": "creator"},
+            ):
+                response = self.client.get(f"{reverse('oauth_callback', kwargs={'provider': 'mastodon'})}?state={state}&code=oauth-code")
+
+        identity = AuthIdentity.objects.get(user=user, provider="MASTODON")
+        self.assertRedirects(response, reverse("account_safety"))
+        self.assertEqual(identity.subject_id, "https://mastodon.social/users/creator")
+        self.assertEqual(identity.handle, "creator@mastodon.social")
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]})
+    def test_oauth_connect_blocks_identity_owned_by_another_user(self):
+        user = FocusUser.objects.create(display_name="Creator")
+        other_user = FocusUser.objects.create(display_name="Other")
+        AuthIdentity.objects.create(
+            user=other_user,
+            provider="GITHUB",
+            subject_id="123",
+            handle="other_handle",
+        )
+        self.client.force_login(user)
+        self.client.get(reverse("oauth_connect_start", kwargs={"provider": "github"}))
+        state = self.client.session["oauth_state"]
+
+        with patch("focus_core.views.post_form_json", return_value={"access_token": "token"}):
+            with patch("focus_core.views.get_bearer_json", return_value={"id": 123, "login": "creator_handle"}):
+                response = self.client.get(f"{reverse('oauth_callback', kwargs={'provider': 'github'})}?state={state}&code=oauth-code")
+
+        self.assertRedirects(response, reverse("account_safety"))
+        self.assertFalse(AuthIdentity.objects.filter(user=user, provider="GITHUB").exists())
+
+    @override_settings(FOCUS_OAUTH_PROVIDERS={"GITHUB": OAUTH_TEST_PROVIDERS["GITHUB"]})
+    def test_oauth_callback_rejects_invalid_state(self):
+        self.client.get(reverse("oauth_sign_in_start", kwargs={"provider": "github"}))
+
+        response = self.client.get(f"{reverse('oauth_callback', kwargs={'provider': 'github'})}?state=wrong&code=oauth-code")
+
+        self.assertRedirects(response, reverse("passkey_sign_in"))
+        self.assertFalse(AuthIdentity.objects.exists())
+        self.assertNotIn("_auth_user_id", self.client.session)
 
     def test_passkey_sign_in_redirects_signed_in_user(self):
         user = FocusUser.objects.create(display_name="Creator")

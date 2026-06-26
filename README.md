@@ -214,6 +214,42 @@ FOCUS_DISCORD_CLIENT_ID=your-discord-oauth-client-id
 FOCUS_DISCORD_CLIENT_SECRET=your-discord-oauth-client-secret
 ```
 
+### GitHub OAuth setup
+
+Create a GitHub OAuth app for each environment that needs GitHub sign-in. GitHub OAuth apps have one authorization callback URL, so a local development server and a production site usually need separate OAuth apps.
+
+1. Go to GitHub's [OAuth app settings](https://github.com/settings/developers) and choose **New OAuth App**.
+2. Set **Application name** to something recognizable, such as `FOCUS local` or `FOCUS production`.
+3. Set **Homepage URL** to the base URL people use for that environment, such as `http://127.0.0.1:8000/` or `https://focus.example.org/`.
+4. Set **Authorization callback URL** to the full FOCUS callback URL:
+
+```text
+http://127.0.0.1:8000/auth/github/callback/
+https://focus.example.org/auth/github/callback/
+```
+
+5. Register the app, then copy the generated **Client ID** into `FOCUS_GITHUB_CLIENT_ID`.
+6. Generate a **Client Secret** and copy it into `FOCUS_GITHUB_CLIENT_SECRET`.
+
+### Discord OAuth setup
+
+Create a Discord application for each environment that needs Discord sign-in.
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and choose **New Application**.
+2. Give it a recognizable name, such as `FOCUS local` or `FOCUS production`.
+3. Open the application's **OAuth2** page.
+4. Under **Redirects**, add the full FOCUS callback URL and save changes:
+
+```text
+http://127.0.0.1:8000/auth/discord/callback/
+https://focus.example.org/auth/discord/callback/
+```
+
+5. In **Client Information**, copy the **Client ID** into `FOCUS_DISCORD_CLIENT_ID`.
+6. Reset or reveal the **Client Secret** and copy it into `FOCUS_DISCORD_CLIENT_SECRET`.
+
+FOCUS only needs Discord OAuth2 sign-in with the `identify` scope. You do not need to add a bot for normal FOCUS sign-in.
+
 Mastodon sign-in does not require choosing one server in deployment settings. Users enter the server where their Mastodon account lives, and FOCUS uses that server's OAuth API for the sign-in request. To disable Mastodon sign-in:
 
 ```bash
